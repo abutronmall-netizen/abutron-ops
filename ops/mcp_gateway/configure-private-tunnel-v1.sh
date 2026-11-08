@@ -46,10 +46,12 @@ if [[ ! "$API_KEY" =~ ^[A-Za-z0-9._-]{24,512}$ ]]; then
   exit 2
 fi
 
-# No key passed on the command line, committed to GitHub, or printed.
-config_env=(HOME="$STATE" XDG_CONFIG_HOME="$STATE/.config" CONTROL_PLANE_API_KEY="$API_KEY")
+# Inject key in the inherited environment ONLY. Passing an env assignment
+# as /usr/bin/env argv exposes the secret in process command lines/proc.
+# runuser passes CONTROL_PLANE_API_KEY through to the target process.
 echo "Initializing private stdio tunnel profile as non-root abutronmcp..."
-runuser -u abutronmcp -- /usr/bin/env "${config_env[@]}" \
+CONTROL_PLANE_API_KEY="$API_KEY" runuser -u abutronmcp -- \
+  /usr/bin/env HOME="$STATE" XDG_CONFIG_HOME="$STATE/.config" \
   "$TUNNEL" init \
   --sample sample_mcp_stdio_local \
   --profile abutron-production \
@@ -57,7 +59,8 @@ runuser -u abutronmcp -- /usr/bin/env "${config_env[@]}" \
   --mcp-command "$WRAPPER"
 
 echo "Verifying tunnel and local MCP configuration..."
-runuser -u abutronmcp -- /usr/bin/env "${config_env[@]}" \
+CONTROL_PLANE_API_KEY="$API_KEY" runuser -u abutronmcp -- \
+  /usr/bin/env HOME="$STATE" XDG_CONFIG_HOME="$STATE/.config" \
   "$TUNNEL" doctor --profile abutron-production --explain ||
   { unset API_KEY; echo "TUNNEL_DOCTOR_FAILED_NOT_ACTIVATED" >&2; exit 1; }
 
