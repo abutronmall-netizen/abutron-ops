@@ -1,0 +1,45 @@
+name: ABUTRON Private MCP Tunnel Offline Checks
+
+on:
+  pull_request:
+    paths:
+      - 'ops/mcp_gateway/stage-tunnel-service-v1.sh'
+      - '.github/workflows/abutron-mcp-service-stage-v1.yml'
+      - '.github/workflows/abutron-mcp-service-stage-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Bash syntax and non-root disabled-only security contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          file=ops/mcp_gateway/stage-tunnel-service-v1.sh
+          bash -n "$file"
+          grep -Fq 'User=abutronmcp' "$file"
+          grep -Fq 'NoNewPrivileges=true' "$file"
+          grep -Fq 'ProtectSystem=strict' "$file"
+          grep -Fq 'ProtectHome=true' "$file"
+          grep -Fq 'ConditionPathExists=/etc/abutron-mcp/tunnel.env' "$file"
+          grep -Fq 'ExecStart=/usr/local/bin/tunnel-client run --profile abutron-production' "$file"
+          grep -Fq "NONROOT_MCP_SERVICE_STAGED_INACTIVE=YES" "$file"
+          ! grep -Fq 'User=root' "$file"
+          ! grep -Eq 'curl.*[|].*(bash|sh)|0[.]0[.]0[.]0|npm (install|update) -g' "$file"
+          # No systemctl start/enable on the 'stage' path; rollback may disable.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("ops/mcp_gateway/stage-tunnel-service-v1.sh").read_text()
+          stage=p.split('  stage)\n',1)[1].split('  status)\n',1)[0]
+          assert 'systemctl enable' not in stage
+          assert 'systemctl start' not in stage
+          assert 'systemctl restart' not in stage
+          assert 'systemctl daemon-reload' in stage
+          assert 'ConditionPathExists=' in stage
+          print('NONROOT_OUTBOUND_SERVICE_STAGING_POLICY_PASS')
+          PY
