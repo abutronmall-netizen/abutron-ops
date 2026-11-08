@@ -1,0 +1,41 @@
+name: ABUTRON 6207 MetaEditor Toolchain Readonly Audit
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  probe:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 METAEDITOR READONLY AUDIT V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Detect native EA include dependency and compiler without compiling
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil,os
+          for name in ('wine','wine64','metaeditor','metaeditor64'):
+              print('EXECUTABLE',name,shutil.which(name) or 'UNAVAILABLE')
+          root=Path('/opt')
+          for base in ['/opt/apex','/opt/apex-client-mt5','/opt/abutron','/var/lib/abutron-apex11-source-handoff']:
+              p=Path(base)
+              print('SEARCH_BASE',base,p.is_dir())
+              if p.is_dir():
+                  found=0
+                  for folder,dirs,files in os.walk(p,followlinks=False):
+                      dirs[:]=[x for x in dirs if not x.startswith('.') and x not in ('node_modules','venv','.venv','.git','__pycache__')]
+                      for filename in files:
+                          if filename=='AdaptiveRiskProofV2.mqh' or filename.lower().startswith('metaeditor') and filename.lower().endswith('.exe'):
+                              f=Path(folder)/filename
+                              print('TOOLCHAIN_DEPENDENCY',str(f)[:250])
+                              found+=1
+                      if found>=12:break
+          print('READONLY_TOOLCHAIN_CHECK_DONE')
+          PY
