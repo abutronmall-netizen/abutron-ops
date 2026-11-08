@@ -13,7 +13,7 @@ jobs:
     if: >-
       github.repository == 'abutronmall-netizen/abutron-ops' &&
       github.event.issue.user.login == 'abutronmall-netizen' &&
-      github.event.issue.title == 'ABUTRON 6207 V4 GUARDIAN WINDOWS COMPILE V1'
+      github.event.issue.title == 'ABUTRON 6207 V4 GUARDIAN WINDOWS COMPILE V2'
     runs-on: [self-hosted,linux,x64,abutron-diagnostics]
     timeout-minutes: 3
     steps:
@@ -27,7 +27,7 @@ jobs:
           src="$GITHUB_WORKSPACE/v4-guardian-qa/AbutronApexExistingDerivV4_6207.mq5"
           inc="/var/lib/abutron-apex11-source-handoff/AdaptiveRiskProofV2.mqh"
           [[ -f "$src" && ! -L "$src" && -f "$inc" && ! -L "$inc" ]] || exit 11
-          [[ "$(git hash-object "$src")" == "244cbaa71164bc2fe9abcb2d869d4bfd1b846aae" ]] || exit 12
+          [[ "$(git hash-object "$src")" == "9e3a9487f6931554f79f4a2596ebf3460004f81a" ]] || exit 12
           [[ "$(sha256sum "$inc" | cut -d' ' -f1)" == "e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44" ]] || exit 13
           python3 - "$src" "$inc" <<'PY'
           import pathlib,re,sys
@@ -66,7 +66,7 @@ jobs:
           $src=Join-Path $root 'AbutronApexExistingDerivV4_6207.mq5'
           $inc=Join-Path $root 'AdaptiveRiskProofV2.mqh'
           if (!(Test-Path $src) -or !(Test-Path $inc)) {throw 'SOURCES_MISSING'}
-          if ((& git hash-object $src).Trim() -ne '244cbaa71164bc2fe9abcb2d869d4bfd1b846aae'){throw 'SOURCE_BLOB_MISMATCH'}
+          if ((& git hash-object $src).Trim() -ne '9e3a9487f6931554f79f4a2596ebf3460004f81a'){throw 'SOURCE_BLOB_MISMATCH'}
           if ((Get-FileHash $inc -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44'){throw 'INCLUDE_SHA_MISMATCH'}
           $setup=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
           Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $setup -MaximumRedirection 3
