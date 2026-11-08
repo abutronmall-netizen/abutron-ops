@@ -1,0 +1,69 @@
+name: ABUTRON Preserve Final Guardian V4 QA EX5
+on:
+  issues:
+    types: [opened]
+permissions:
+  actions: read
+  contents: none
+  issues: read
+jobs:
+  preserve:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON PRESERVE FINAL GUARDIAN QA EX5 V1'
+    runs-on: [self-hosted,linux,x64,abutron-diagnostics]
+    timeout-minutes: 4
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: abutron6207-guardian-ex5-UNAPPROVED
+          run-id: 42459796202
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/abutron-final-guardian-qa
+      - name: Verify SHA and zero-warning log, write only runner-owned 0700 evidence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$(id -un)" == "abutrongha" ]] || exit 10
+          root="$RUNNER_TEMP/abutron-final-guardian-qa"
+          ex5="$root/AbutronApexExistingDerivV4_6207.ex5"
+          log="$root/AbutronApexExistingDerivV4_6207.log"
+          expected=458afad273cb5c2446f52d766d2617cc277bca6b1e990450bb6955c2da64973a
+          [[ -f "$ex5" && -f "$log" && ! -L "$ex5" && ! -L "$log" ]] || exit 11
+          [[ "$(sha256sum "$ex5" | cut -d' ' -f1)" == "$expected" ]] || exit 12
+          [[ "$(stat -c %s "$ex5")" == "87218" ]] || exit 13
+          python3 - "$log" <<'PY'
+          from pathlib import Path
+          import sys
+          buf=Path(sys.argv[1]).read_bytes()
+          if not 100<len(buf)<1000000:raise SystemExit("QA_LOG_SIZE_UNEXPECTED")
+          encoding='utf-16' if buf.startswith((b'\xff\xfe',b'\xfe\xff')) else 'utf-8-sig'
+          try: txt=buf.decode(encoding)
+          except UnicodeError:txt=buf.decode('cp1252')
+          if 'Result: 0 errors, 0 warnings' not in txt:
+            raise SystemExit("QA_LOG_NOT_CLEAN")
+          print("QA_COMPILER_ZERO_ERROR_ZERO_WARNING_VERIFIED")
+          PY
+          dest="$HOME/abutron-unapproved-qa-evidence/deriv6207-v4-guardian-20261108"
+          if [[ -L "$HOME/abutron-unapproved-qa-evidence" || -L "$dest" ]]; then exit 14; fi
+          install -d -m 0700 "$dest"
+          [[ "$(stat -c %a "$dest")" == 700 ]] || exit 15
+          target="$dest/AbutronApexExistingDerivV4_6207.ex5.UNAPPROVED"
+          if [[ -e "$target" ]]; then
+            [[ ! -L "$target" && "$(sha256sum "$target" | cut -d' ' -f1)" == "$expected" ]] || exit 16
+          else
+            install -m 0600 "$ex5" "$target"
+          fi
+          install -m 0600 "$log" "$dest/MetaEditor_ZeroError_ZeroWarning_QA.log"
+          printf '%s\n' \
+            'QA_ONLY__NEVER_COPY_TO_MT5_UNTIL_NATIVE_GUARDIAN_BROKER_CERTIFIED' \
+            'Source Git blob 9e3a9487f6931554f79f4a2596ebf3460004f81a' \
+            'Native EX5 SHA256 458afad273cb5c2446f52d766d2617cc277bca6b1e990450bb6955c2da64973a' \
+            'Native EA default V4 automatic orders OFF; requires actual root guardian and CRM portal wiring' \
+            'LIVE TRADING FORBIDDEN' >"$dest/QA_NOT_AUTHORIZED_FOR_TRADE.txt"
+          chmod 0600 "$dest/QA_NOT_AUTHORIZED_FOR_TRADE.txt"
+          echo "QA_BINARY_SAFELY_PRESERVED_OUTSIDE_ALL_MT5_TERMINALS"
+          echo "QA_EX5_SHA256=$expected"
+          echo "PRESERVED_PATH=$target"
+          echo "NO_TRADING_OR_PRODUCTION_CHANGES"
