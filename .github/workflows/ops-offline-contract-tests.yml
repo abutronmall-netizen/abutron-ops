@@ -1,0 +1,29 @@
+name: ABUTRON Root Operations — Offline Contract Tests
+
+# Run test code only on an ephemeral GitHub-hosted machine, never on the
+# production self-hosted ABUTRON runner or its sudo identity.
+on:
+  pull_request:
+    paths:
+      - 'ops/**'
+      - '.github/workflows/ops-offline-contract-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile source without executing it
+        run: python -m compileall -q ops
+      - name: Run fixed-operation denial and archive security tests
+        run: python -m unittest discover -s ops/tests -p 'test_*.py' -v
+      - name: Exercise root-only source stage and rollback in disposable hosted CI
+        run: sudo -n env PYTHONPATH="$PWD" /usr/bin/python3 -m unittest discover -s ops/tests -p 'test_*.py' -v
