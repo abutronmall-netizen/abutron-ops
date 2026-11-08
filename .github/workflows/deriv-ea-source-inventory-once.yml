@@ -1,0 +1,43 @@
+name: ABUTRON Deriv V3 EA Source Inventory
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  scan:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON DERIV EA SOURCE INVENTORY V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Inventory accessible Deriv MQL5 source filenames and V3 parser presence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import os,re
+          from pathlib import Path
+          targets=[]
+          roots=['/opt/apex-client-mt5','/opt/apex','/opt/abutron','/opt/abutron-research','/var/backups']
+          for root in roots:
+              for base,dirs,files in os.walk(root,followlinks=False):
+                  dirs[:]=[d for d in dirs if not d.startswith('.') and d not in ('node_modules','__pycache__','.git','venv','.venv')]
+                  for name in files:
+                      if name.lower().endswith(('.mq5','.mqh')) and any(t in name.lower() for t in ('deriv','native','adaptive','optionc','apex','order','bridge')):
+                          targets.append(Path(base)/name)
+          print('CANDIDATE_MQL5_SOURCE_COUNT',len(targets))
+          for p in targets[:70]:
+              print('CANDIDATE_SOURCE',str(p)[:225])
+              try:
+                  if p.stat().st_size<250000:
+                      data=p.read_text(encoding='utf-8-sig',errors='replace')
+                      for token in ('APEX_NATIVE_ADAPTIVE_ORDER_V3','APEX_NATIVE_ORDER_V1.req','ABUTRON_OPTIONC_DERIV_CAPABILITY_V2'):
+                          if token in data:print('PARSER_MARKER_FOUND',p.name,token)
+              except (OSError,PermissionError):
+                  print('UNREADABLE_SOURCE',p.name)
+          print('SOURCE_INVENTORY_ONLY_NO_EXECUTION')
+          PY
