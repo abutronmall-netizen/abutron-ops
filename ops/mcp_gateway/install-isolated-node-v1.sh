@@ -30,7 +30,14 @@ fi
 if [[ -e "$DEST" ]]; then
   if [[ -f "$DEST/bin/node" && ! -L "$DEST/bin/node" &&
         "$("$DEST/bin/node" --version)" == "$VERSION" ]]; then
+    # The official tar permissions can be masked by root umask 077.
+    # Restore read/execute access ONLY to the isolated Node binary path.
+    test "$(stat -c '%u:%g' "$DEST/bin")" = '0:0'
+    test "$(stat -c '%u:%g' "$DEST/bin/node")" = '0:0'
+    [[ ! -L "$DEST/bin" && ! -L "$DEST/bin/node" ]]
+    chmod 0755 "$DEST/bin" "$DEST/bin/node"
     echo "ISOLATED_NODE_ALREADY_INSTALLED=$VERSION"
+    echo "ISOLATED_NODE_NONROOT_EXECUTION_READY=YES"
     exit 0
   fi
   echo "REFUSE_OVERWRITE_EXISTING_NODE_RUNTIME: review manually" >&2
@@ -65,6 +72,7 @@ tar -xJf "${temp}/${FILENAME}" -C "${temp}/runtime" --strip-components=1 \
 
 chown -R root:root "${temp}/runtime"
 chmod -R go-w "${temp}/runtime"
+chmod -R go+rX "${temp}/runtime"
 [[ ! -e "$DEST" && ! -L "$DEST" ]] || { echo "DESTINATION_APPEARED_DURING_INSTALL" >&2; exit 1; }
 mv -T -- "${temp}/runtime" "$DEST"
 echo "ISOLATED_NODE_INSTALL_PASS=$("$DEST/bin/node" --version)"
