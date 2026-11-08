@@ -1,0 +1,103 @@
+name: ABUTRON Desktop Commander Local MCP Smoke V1
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-desktop-commander-local-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS SMOKE DESKTOP COMMANDER V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Check MCP initialize and tool discovery without invoking tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = "abutrongha"
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+          import sys
+          import tempfile
+
+          node=Path("/opt/abutron-mcp/node/bin/node")
+          server=Path("/opt/abutron-dcmcp/node_modules/@wonderwhy-er/desktop-commander/dist/index.js")
+          for name,p in (("node",node),("desktop-commander",server)):
+              try:
+                  s=p.lstat()
+              except OSError:
+                  print("MCP_SMOKE_BLOCKED_MISSING_"+name.upper().replace("-","_"))
+                  sys.exit(2)
+              if (not stat.S_ISREG(s.st_mode) or p.is_symlink() or
+                      s.st_uid != 0):
+                  print("MCP_SMOKE_BLOCKED_UNTRUSTED_"+name.upper().replace("-","_"))
+                  sys.exit(2)
+
+          a={"jsonrpc":"2.0","id":1,"method":"initialize",
+             "params":{"protocolVersion":"2025-03-26","capabilities":{},
+                       "clientInfo":{"name":"abutron-local-readonly-smoke","version":"1.0"}}}
+          b={"jsonrpc":"2.0","method":"notifications/initialized"}
+          c={"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+          payload="\n".join(json.dumps(item,separators=(",",":")) for item in (a,b,c))+"\n"
+
+          with tempfile.TemporaryDirectory(prefix="abutron-mcp-smoke-") as home:
+              env=dict(os.environ)
+              env["HOME"]=home
+              env["XDG_CONFIG_HOME"]=home
+              env["XDG_CACHE_HOME"]=home
+              env["PATH"]=str(node.parent)+":/usr/bin:/bin"
+              try:
+                  p=subprocess.run([str(node),str(server),"--no-onboarding"],
+                      input=payload,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                      text=True,timeout=25,env=env,check=False)
+              except (OSError,subprocess.TimeoutExpired):
+                  print("MCP_LOCAL_START_OR_TIMEOUT_FAILED")
+                  sys.exit(1)
+
+          decoded={}
+          for line in p.stdout[:2_000_000].splitlines():
+              try:
+                  value=json.loads(line)
+              except (TypeError,ValueError):
+                  continue
+              if not isinstance(value,dict):
+                  continue
+              rid=value.get("id")
+              if type(rid) is int and rid in (1,2):
+                  decoded[rid]=value
+
+          init=decoded.get(1,{}).get("result")
+          if not isinstance(init,dict) or not isinstance(init.get("protocolVersion"),str):
+              print("MCP_INIT=FAILED")
+              sys.exit(1)
+          print("MCP_INIT=PASS")
+          tools=decoded.get(2,{}).get("result")
+          if not isinstance(tools,dict) or not isinstance(tools.get("tools"),list):
+              print("MCP_TOOLS_LIST=FAILED")
+              sys.exit(1)
+          count=len(tools["tools"])
+          if count<1 or count>100:
+              print("MCP_TOOLS_LIST_UNEXPECTED_COUNT")
+              sys.exit(1)
+          print("MCP_TOOLS_LIST=PASS")
+          print("MCP_TOOLS_COUNT="+str(count))
+          print("NO_MCP_TOOL_INVOKED=YES")
+          print("CHATGPT_PLUS_BROWSER_CONNECTION=NOT_TESTED")
+          PY
