@@ -1,0 +1,67 @@
+name: ABUTRON Runner Least Privilege One Shot
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  restrict:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON RESTRICT RUNNER SUDO V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Atomic validated sudoers deprivileging with fixed staging access preserved
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/python3 - <<'PY'
+          import os,stat,subprocess,shutil,time
+          from pathlib import Path
+          assert os.geteuid()==0
+          p=Path('/etc/sudoers.d/90-abutron-github')
+          fixed=Path('/etc/sudoers.d/abutron-gh-apex-staging')
+          backup=Path('/root/abutron-gh-wildcard-sudo-before-restrict-20261108')
+          if not p.is_file() or p.is_symlink():
+              raise SystemExit('GITHUB_WILDCARD_SUDO_NOT_PRESENT')
+          st=p.lstat()
+          if st.st_uid!=0 or st.st_mode & 0o022:
+              raise SystemExit('UNSAFE_EXISTING_SUDOERS_FILE')
+          if p.read_text().strip() != 'abutrongha ALL=(root) NOPASSWD: ALL':
+              raise SystemExit('WILDCARD_SUDO_CONTENT_CHANGED')
+          if not fixed.is_file() or fixed.is_symlink() or fixed.stat().st_uid!=0:
+              raise SystemExit('FIXED_STAGING_RULE_MISSING')
+          s=fixed.read_text()
+          if '/usr/local/sbin/abutron-gh-apex-staging-verify' not in s or 'abutrongha' not in s:
+              raise SystemExit('FIXED_STAGING_RULE_DOES_NOT_GRANT_SAFE_COMMAND')
+          # Verify the fixed root-owned program cannot be rewritten by the runner.
+          verifier=Path('/usr/local/sbin/abutron-gh-apex-staging-verify')
+          if not verifier.is_file() or verifier.is_symlink() or verifier.stat().st_uid !=0 or verifier.stat().st_mode & 0o022:
+              raise SystemExit('FIXED_PROGRAM_UNTRUSTED')
+          if subprocess.run(['/usr/sbin/visudo','-c'],capture_output=True).returncode:
+              raise SystemExit('PRECHANGE_SUDOERS_INVALID')
+          if backup.exists():raise SystemExit('SUDOERS_BACKUP_ALREADY_EXISTS')
+          with backup.open('x') as f:
+              os.chmod(backup,0o600)
+              f.write(p.read_text())
+          p.unlink()
+          if subprocess.run(['/usr/sbin/visudo','-c'],capture_output=True).returncode:
+              shutil.copy2(backup,p)
+              raise SystemExit('POSTCHANGE_SUDOERS_INVALID_ROLLED_BACK')
+          cmd=subprocess.run(['/usr/bin/sudo','-l','-U','abutrongha'],capture_output=True,text=True,timeout=8)
+          if cmd.returncode or 'NOPASSWD: ALL' in cmd.stdout:
+              shutil.copy2(backup,p)
+              raise SystemExit('UNRESTRICTED_SUDO_REMAINS_OR_VERIFY_FAILED_ROLLED_BACK')
+          if '/usr/local/sbin/abutron-gh-apex-staging-verify' not in cmd.stdout:
+              shutil.copy2(backup,p)
+              raise SystemExit('SAFE_STAGING_PERMISSION_LOST_ROLLED_BACK')
+          print('LEAST_PRIVILEGE_SUDO_ENFORCED')
+          print('WILDCARD_NOPASSWD_REMOVED')
+          print('FIXED_STAGING_SUDO_RETAINED')
+          print('SUDOERS_FULL_PARSE_PASS')
+          print('ROOT_OWNED_ROLLBACK_IN_ROOT_HOME')
+          print('NO_SERVICE_OR_TRADING_CHANGES')
+          PY
