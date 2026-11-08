@@ -29,5 +29,4 @@ jobs:
             echo 'Unsafe runner identity: already root'
             exit 2
           fi
-          test -x /usr/local/sbin/abutron-gh-apex-staging-verify
           sudo -n /usr/local/sbin/abutron-gh-apex-staging-verify
