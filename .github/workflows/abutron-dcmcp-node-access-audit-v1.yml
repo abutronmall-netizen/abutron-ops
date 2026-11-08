@@ -1,0 +1,58 @@
+name: ABUTRON Desktop Commander Node Path Audit V1
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  readonly:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS DIAG NODE PATH V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 2
+    steps:
+      - name: Confirm host filesystem and executable directory traversability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = "abutrongha"
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          import os,stat,subprocess,socket
+          paths=["/opt","/opt/abutron-mcp","/opt/abutron-mcp/node",
+              "/opt/abutron-mcp/node/bin",
+              "/opt/abutron-mcp/node/bin/node"]
+          print("NODE_AUDIT_HOST="+socket.gethostname()[:80])
+          print("RUNNER_USER=abutrongha")
+          for i,p in enumerate(paths):
+              label="NODE_PATH_"+str(i)
+              try:
+                  s=os.lstat(p)
+                  kind=("DIR" if stat.S_ISDIR(s.st_mode) else
+                        "FILE" if stat.S_ISREG(s.st_mode) else
+                        "SYMLINK" if stat.S_ISLNK(s.st_mode) else "OTHER")
+                  print(label+"="+kind+" UID="+str(s.st_uid)+" MODE="+oct(stat.S_IMODE(s.st_mode))+
+                        " READ="+str(os.access(p,os.R_OK))+" EXEC="+str(os.access(p,os.X_OK)))
+              except (OSError,PermissionError) as exc:
+                  print(label+"=INACCESSIBLE ERRNO="+str(getattr(exc,"errno","?")))
+          cmd="/opt/abutron-mcp/node/bin/node"
+          try:
+              p=subprocess.run([cmd,"--version"],capture_output=True,text=True,timeout=4,check=False)
+              txt=p.stdout.strip()
+              if p.returncode==0 and txt.startswith("v") and all(c.isdigit() or c in "v." for c in txt):
+                  print("NODE_RUNNER_VERSION="+txt)
+              else:
+                  print("NODE_RUNNER_VERSION=UNVERIFIED EXIT="+str(p.returncode))
+          except OSError as exc:
+              print("NODE_RUNNER_VERSION=EXEC_FAILURE ERRNO="+str(getattr(exc,"errno","?")))
+          except subprocess.TimeoutExpired:
+              print("NODE_RUNNER_VERSION=TIMEOUT")
+          print("NODE_AUDIT_READONLY_COMPLETE=YES")
+          PY
