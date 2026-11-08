@@ -48,7 +48,7 @@ class InstallerTests(unittest.TestCase):
              patch.object(installer, "_secure_source",
                           return_value=b"#!/usr/bin/python3 -I\n# readonly test\n"), \
              patch.object(installer.pwd, "getpwnam", return_value=object()), \
-             patch.object(installer, "_run", side_effect=run), \
+             patch.object(installer, "_run", side_effect=lambda *a: run(a)), \
              patch("sys.argv", ["trusted-root-installer"]):
             return installer.install()
 
