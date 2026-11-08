@@ -22,7 +22,7 @@ import sys
 import tempfile
 
 SOURCE = Path("/root/abutron-ops/ops/approved_source_stage_v1.py")
-EXPECTED_GIT_BLOB = "ef89d40d3af2c5481405ea694483bf1b1b478fa4"
+EXPECTED_GIT_BLOB = "be7fa563eb0066e4482a28fbbed6a7e6a93db074"
 RUNNER_USER = "abutrongha"
 BINARIES = (
     Path("/usr/local/sbin/abutron-gh-apex-source-stage-v1"),
@@ -30,7 +30,7 @@ BINARIES = (
 )
 SUDOERS = Path("/etc/sudoers.d/abutron-gh-apex-source-ops-v1")
 STORE = Path("/var/lib/abutron-apex11-inactive-source-v1")
-APPROVAL_PARENT = Path("/var/lib/abutron-gh-runner")
+APPROVAL_PARENT = Path("/var/lib")
 APPROVAL = APPROVAL_PARENT / "abutron-apex11-source-approval-v1"
 ALLOWED_INSTALL = {
     str(SOURCE),
@@ -127,8 +127,9 @@ def install() -> None:
     for path in (*BINARIES, SUDOERS):
         if path.exists() or path.is_symlink():
             raise Blocked("REFUSE_TO_REPLACE_ROOT_TARGET")
-    # Do not modify the existing GitHub runner directory's permissions.
-    # Fail rather than treating runner-writeable source approval as trusted.
+    # Approval material is rooted in /var/lib, NOT the runner-owned
+    # /var/lib/abutron-gh-runner workspace. Never change runner ownership,
+    # and never allow its contents to select root source or manifest files.
     secure_root(APPROVAL_PARENT, directory=True)
     _assert_runner_denied("/usr/bin/id")
     _assert_runner_denied("/usr/bin/bash")

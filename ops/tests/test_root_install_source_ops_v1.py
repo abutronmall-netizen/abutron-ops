@@ -52,6 +52,22 @@ class InstallerTests(unittest.TestCase):
              patch("sys.argv", ["trusted-root-installer"]):
             return installer.install()
 
+
+    def test_reviewed_source_blob_and_approval_directory_are_pinned(self):
+        from hashlib import sha1
+        from ops import approved_source_stage_v1 as stage
+        source = Path(stage.__file__).read_bytes()
+        git_blob = sha1(
+            ("blob " + str(len(source)) + "\0").encode() + source
+        ).hexdigest()
+        self.assertEqual(installer.EXPECTED_GIT_BLOB, git_blob)
+        self.assertEqual(stage.INBOX, installer.APPROVAL)
+        self.assertEqual(installer.APPROVAL_PARENT, Path("/var/lib"))
+        self.assertEqual(
+            stage.INBOX, Path("/var/lib/abutron-apex11-source-approval-v1")
+        )
+        self.assertNotIn("/var/lib/abutron-gh-runner", str(stage.INBOX))
+
     def test_installs_only_two_exact_commands_and_no_argument_sudo(self):
         out = io.StringIO()
         with redirect_stdout(out):
