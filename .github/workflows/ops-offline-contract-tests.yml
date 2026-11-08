@@ -25,3 +25,5 @@ jobs:
         run: python -m compileall -q ops
       - name: Run fixed-operation denial and archive security tests
         run: python -m unittest discover -s ops/tests -p 'test_*.py' -v
+      - name: Exercise root-only source stage and rollback in disposable hosted CI
+        run: sudo -n env PYTHONPATH="$PWD" /usr/bin/python3 -m unittest discover -s ops/tests -p 'test_*.py' -v
