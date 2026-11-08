@@ -17,7 +17,7 @@ Pin: \`abutronmall-netizen/abutron-apex\` at commit \`68f9815d39eeecbecbc5845e05
 
 A root operator prepares this directory outside the runner-writable workspace:
 
-\`/var/lib/abutron-gh-runner/abutron-apex11-source-approval-v1/\`
+\`/var/lib/abutron-apex11-source-approval-v1/\`
 
 Both this directory and its parent must be root-owned and not group/world-writable. Put the independently verified exact source archive at \`source.tar.gz\` (regular root-owned file, no group/world write) and the following **root-owned 0600** manifest at \`manifest.json\`:
 
@@ -41,7 +41,7 @@ Both this directory and its parent must be root-owned and not group/world-writab
 ## Bootstrap checklist (not executed by GitHub)
 
 1. Independently verify this script, the pinned APEX commit, actual broker and CRM state, ownership, backup/restore evidence, and read-only tests.
-2. Create \`/var/lib/abutron-apex11-inactive-source-v1\` mode 0700 root:root, and protected root-owned approval directory. Ensure the existing parent \`/var/lib/abutron-gh-runner\` is not writable by \`abutrongha\` or others. If it is writable, **stop**; do not weaken checks. Move approval input to a separately reviewed root-only parent and revise/test the code first.
+2. Create \`/var/lib/abutron-apex11-inactive-source-v1\` mode 0700 root:root, and protected root-owned approval directory. The approval directory has been moved to a dedicated root-owned child of \`/var/lib\`. **Do not change ownership or modes of \`/var/lib/abutron-gh-runner\`**, which is legitimately owned by the GitHub runner account.
 3. Root-install the reviewed file to the **two exact command paths** root:root mode 0750. Record file SHA256 and create tested rollback copies of anything replaced. Verify that Python 3 is already available; do not install packages just for this.
 4. Only after review, create root-owned \`/etc/sudoers.d/abutron-gh-apex-source-ops-v1\` mode 0440 with the following **no-argument exact-path** grants (and no other commands):
 
@@ -86,7 +86,7 @@ inspect the exact code and confirm:
 cd /root/abutron-ops
 git rev-parse HEAD
 git hash-object ops/approved_source_stage_v1.py
-# Must print: ef89d40d3af2c5481405ea694483bf1b1b478fa4
+# Must print: be7fa563eb0066e4482a28fbbed6a7e6a93db074
 sed -n '1,250p' ops/root_install_source_ops_v1.py
 /usr/bin/python3 -I /root/abutron-ops/ops/root_install_source_ops_v1.py
 \`\`\`
@@ -115,3 +115,7 @@ closed after those sudo grants are revoked.
 **Important:** the bootstrap is presently only a reviewed GitHub file until
 the actual server root command returns success. CI cannot grant itself
 additional privileges.
+
+## Runner-owned directory correction — 8 Nov 2026
+
+On production `/var/lib/abutron-gh-runner` was verified as `abutrongha:abutrongha 0700`. This is correct for the GitHub runner. The prior root bootstrap incorrectly required that runner-owned parent to be root-owned, so it would have failed. The privileged source approval path is now `/var/lib/abutron-apex11-source-approval-v1`, with parent `/var/lib` and root-only `0700` directory. The source-blob pin and installer were updated together and validated in disposable CI. Never run the older installer revision or chown the runner directory to bypass the check.
