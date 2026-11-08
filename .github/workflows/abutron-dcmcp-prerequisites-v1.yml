@@ -103,8 +103,8 @@ jobs:
           for line in p.stdout.splitlines():
               if "=" in line:
                   k,v=line.split("=",1)
-                  if k in ("LoadState","ActiveState","UnitFileState") and
-                      len(v)<30 and v.replace("-","").isalnum():
+                  if (k in ("LoadState","ActiveState","UnitFileState") and
+                          len(v)<30 and v.replace("-","").isalnum()):
                       result[k]=v
           for k in ("LoadState","ActiveState","UnitFileState"):
               print("TUNNEL_"+k.upper()+"="+result.get(k,"UNVERIFIED"))
