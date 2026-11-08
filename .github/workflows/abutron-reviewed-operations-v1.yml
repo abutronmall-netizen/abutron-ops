@@ -1,0 +1,183 @@
+name: ABUTRON Reviewed Runner Operations V1
+
+# Owner-scoped, fixed operations only. No PR/push execution on this
+# self-hosted production runner. Never interpolate issue text into shell.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: One reviewed ABUTRON operation (no shell arguments)
+        required: true
+        type: choice
+        options:
+          - verify-host
+          - verify-staging
+          - stage-approved-source
+          - rollback-staged-source
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-reviewed-runner-operations-v1
+  cancel-in-progress: false
+
+jobs:
+  verify-host:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      ((github.event_name == 'workflow_dispatch' &&
+        inputs.operation == 'verify-host') ||
+       (github.event_name == 'issues' &&
+        github.event.issue.user.login == 'abutronmall-netizen' &&
+        github.event.issue.title == 'ABUTRON OPS VERIFY HOST V1'))
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 4
+    steps:
+      - name: Verify runner identity and fixed-sudo boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          import os, stat
+          for path in (
+              '/usr/local/sbin/abutron-gh-apex-staging-verify',
+              '/etc/sudoers.d/abutron-gh-apex-staging',
+          ):
+              st = os.lstat(path)
+              if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                      or st.st_mode & 0o022):
+                  raise SystemExit('BLOCKED_UNTRUSTED_ROOT_POLICY_FILE')
+              print('ROOT_OWNED_NONWRITABLE', path)
+          PY
+          policy="$(sudo -n -l 2>/dev/null)" || { echo 'BLOCKED_SUDO_POLICY_UNREADABLE'; exit 1; }
+          if printf '%s\n' "$policy" | grep -Eq 'NOPASSWD:[[:space:]]*ALL([[:space:]]|$)'; then
+            echo 'BLOCKED_UNRESTRICTED_SUDO'
+            exit 1
+          fi
+          sudo -n -l /usr/local/sbin/abutron-gh-apex-staging-verify >/dev/null 2>&1 ||
+            { echo 'BLOCKED_FIXED_SUDO_NOT_ALLOWED'; exit 1; }
+          echo 'FIXED_SUDO_POLICY_PASS'
+      - name: Read fixed nonsecret host and native feed diagnostics
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          date -u '+utc=%Y-%m-%dT%H:%M:%SZ'
+          hostname
+          df -h /
+          free -h
+          systemctl is-system-running || true
+          systemctl --failed --no-pager --no-legend || true
+          systemctl show -p ActiveState -p SubState -p Result abutron-native-readonly-mt5-6207.service
+          systemctl show -p ActiveState -p SubState -p Result abutron-fpmarkets-native-feed.timer
+          sha256sum /opt/apex-client-mt5/fpmarkets-history/fp_native_history_collect.py
+
+  verify-staging:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      ((github.event_name == 'workflow_dispatch' &&
+        inputs.operation == 'verify-staging') ||
+       (github.event_name == 'issues' &&
+        github.event.issue.user.login == 'abutronmall-netizen' &&
+        github.event.issue.title == 'ABUTRON OPS VERIFY STAGING V1'))
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 8
+    steps:
+      - name: Invoke only existing approved root-owned source verifier
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          sudo -n /usr/local/sbin/abutron-gh-apex-staging-verify
+
+  stage-approved-source:
+    # Manual dispatch only; NOT an instruction to promote active MT5 binaries.
+    # A separately reviewed root-owned, argument-free staging program must be
+    # installed and exact-command sudoers approved before this can run.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      inputs.operation == 'stage-approved-source'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 8
+    steps:
+      - name: Fail closed unless fixed reviewed source-only stager is installed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          policy="$(sudo -n -l 2>/dev/null)" ||
+            { echo 'BLOCKED: no readable fixed sudo policy'; exit 78; }
+          if printf '%s\n' "$policy" | grep -Eq 'NOPASSWD:[[:space:]]*ALL([[:space:]]|$)'; then
+            echo 'BLOCKED: wildcard sudo detected'
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, stat
+          path = '/usr/local/sbin/abutron-gh-apex-source-stage-v1'
+          try:
+              st = os.lstat(path)
+          except OSError:
+              raise SystemExit('BLOCKED: missing reviewed root-owned program')
+          if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                  or st.st_mode & 0o022 or not st.st_mode & stat.S_IXUSR):
+              raise SystemExit('BLOCKED: untrusted program ownership or mode')
+          print('ROOT_PROGRAM_INTEGRITY_PRECHECK_PASS')
+          PY
+          sudo -n -l /usr/local/sbin/abutron-gh-apex-source-stage-v1 >/dev/null 2>&1 ||
+            { echo 'BLOCKED: fixed source-only staging program not sudo-allowlisted'; exit 78; }
+          sudo -n /usr/local/sbin/abutron-gh-apex-source-stage-v1
+
+  rollback-staged-source:
+    # Manual dispatch only; staged source rollback, never LIVE/DEMO switches.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      inputs.operation == 'rollback-staged-source'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 8
+    steps:
+      - name: Fail closed unless fixed reviewed rollback program is installed
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          policy="$(sudo -n -l 2>/dev/null)" ||
+            { echo 'BLOCKED: no readable fixed sudo policy'; exit 78; }
+          if printf '%s\n' "$policy" | grep -Eq 'NOPASSWD:[[:space:]]*ALL([[:space:]]|$)'; then
+            echo 'BLOCKED: wildcard sudo detected'
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, stat
+          path = '/usr/local/sbin/abutron-gh-apex-source-rollback-v1'
+          try:
+              st = os.lstat(path)
+          except OSError:
+              raise SystemExit('BLOCKED: missing reviewed root-owned program')
+          if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0
+                  or st.st_mode & 0o022 or not st.st_mode & stat.S_IXUSR):
+              raise SystemExit('BLOCKED: untrusted program ownership or mode')
+          print('ROOT_PROGRAM_INTEGRITY_PRECHECK_PASS')
+          PY
+          sudo -n -l /usr/local/sbin/abutron-gh-apex-source-rollback-v1 >/dev/null 2>&1 ||
+            { echo 'BLOCKED: fixed source rollback program not sudo-allowlisted'; exit 78; }
+          sudo -n /usr/local/sbin/abutron-gh-apex-source-rollback-v1
