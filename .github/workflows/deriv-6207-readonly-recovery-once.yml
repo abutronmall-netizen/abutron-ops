@@ -1,0 +1,70 @@
+name: ABUTRON Deriv 6207 Isolated Readonly Recovery (one-shot)
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+concurrency:
+  group: abutron-6207-readonly-recovery
+  cancel-in-progress: false
+jobs:
+  recovery:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 READONLY RECOVERY V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 4
+    steps:
+      - name: Backed-up, fail-closed, single start of isolated no-order Deriv DEMO sidecar
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/python3 - <<'PY'
+          import hashlib, os, sqlite3, stat, subprocess, time
+          from pathlib import Path
+          if os.geteuid()!=0: raise SystemExit("ROOT_REQUIRED")
+          unit="abutron-native-readonly-mt5-6207.service"
+          src=Path("/opt/abutron-research/native-evidence/read-only-sidecar/abutron_deriv_readonly_sidecar_worker_v1.py")
+          current=src.lstat()
+          if not stat.S_ISREG(current.st_mode) or src.is_symlink() or current.st_uid!=0 or current.st_mode&0o022 or current.st_size>20000:
+              raise SystemExit("READONLY_SIDECAR_SOURCE_UNTRUSTED")
+          code=src.read_text()
+          for marker in ("NO_ORDER_FUNCTIONS","BROKER_PROOF_STALE","READONLY_SIDECAR_FAIL_CLOSED","SIDECAR_REUSE_UNSAFE_TERMINAL_PRESENT"):
+              if marker not in code: raise SystemExit("READONLY_SIDECAR_CONTRACT_NOT_VERIFIED")
+          print("READONLY_SIDECAR_SHA256",hashlib.sha256(src.read_bytes()).hexdigest())
+          def show(k):
+              p=subprocess.run(["systemctl","show",unit,"--value","-p",k],capture_output=True,text=True,timeout=7,check=True)
+              return p.stdout.strip()
+          if show("LoadState")!="loaded" or show("ActiveState") not in ("failed","inactive"):
+              raise SystemExit("READONLY_SIDECAR_NOT_IN_RECOVERABLE_STATE")
+          if show("Restart")!="no" or show("User") in ("","root") or show("Type") not in ("simple","exec"):
+              raise SystemExit("READONLY_SIDECAR_SERVICE_IDENTITY_UNVERIFIED")
+          if show("ExecStart").count("/opt/abutron-research/native-evidence/read-only-sidecar/abutron_deriv_readonly_sidecar_worker_v1.py")!=1:
+              raise SystemExit("READONLY_SIDECAR_EXECSTART_CHANGED")
+          if subprocess.run(["systemctl","is-active","--quiet","abutron-apex-native-orders.timer"],timeout=7).returncode==0:
+              raise SystemExit("APEX_NATIVE_ORDER_DISPATCH_TIMER_ACTIVE")
+          db=sqlite3.connect("file:/var/lib/apex-signup/accounts.sqlite3?mode=ro",uri=True,timeout=5)
+          db.execute("PRAGMA query_only=ON")
+          bad=db.execute("""SELECT COUNT(*) FROM apex_mt5_connections a
+              LEFT JOIN apex_trade_controls t ON t.connection_id=a.id
+              WHERE a.broker IN ('Deriv','FP Markets') AND COALESCE(t.effective_enabled,0) != 0""").fetchone()[0]
+          db.close()
+          if bad: raise SystemExit("EFFECTIVE_TRADING_ENABLED_REFUSE_SIDECAR_RECOVERY")
+          logs=sorted(Path("/var/log").glob("abutron-gh-one-shot-backup-20261108-*.log"),
+                      key=lambda x:x.stat().st_mtime, reverse=True)
+          if not logs or time.time()-logs[0].stat().st_mtime>3600:
+              raise SystemExit("FRESH_FULL_BACKUP_UNVERIFIED")
+          t=logs[0].read_text(errors="replace")
+          if not all(s in t for s in ("FULL_BACKUP_END_SUCCESS","RESTIC_REPO_METADATA_CHECK_PASS","V7_DATABASE_REMOTE_DUMP_READBACK_PASS")):
+              raise SystemExit("RESTIC_BACKUP_PROOFS_MISSING")
+          print("PRECHECKS_PASS_READONLY_ISOLATED_NO_ORDER")
+          p=subprocess.run(["systemctl","start","--no-block",unit],capture_output=True,timeout=8,check=False)
+          if p.returncode: raise SystemExit("ISOLATED_READONLY_START_REQUEST_REJECTED")
+          print("READONLY_SIDECAR_SINGLE_START_REQUESTED")
+          time.sleep(16)
+          for field in ("ActiveState","SubState","Result"):
+              print("sidecar_"+field,show(field))
+          print("NO_ORDER_WRITER_OR_ACCOUNT_FLAGS_MODIFIED")
+          PY
