@@ -1,0 +1,80 @@
+name: ABUTRON Read-Only Health Check
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: none
+  issues: write
+
+concurrency:
+  group: abutron-readonly-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON HEALTHCHECK V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Collect only allowlisted read-only diagnostics
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          commands = [
+              ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"],
+              ["hostname"],
+              ["uname", "-sr"],
+              ["uptime"],
+              ["free", "-h"],
+              ["df", "-h", "/"],
+              ["systemctl", "is-system-running"],
+          ]
+
+          lines = ["### ABUTRON read-only system health", "",
+                   "Automatic response to the allowlisted health-check issue.",
+                   "No deployments, service changes, secrets, trading actions or arbitrary issue commands are executed.",
+                   "", "```text"]
+          for command in commands:
+              try:
+                  result = subprocess.run(command, capture_output=True,
+                                          text=True, timeout=8, check=False)
+                  output = (result.stdout + result.stderr).strip()[:1500]
+                  lines.extend(["$ " + " ".join(command), output or "(no output)",
+                                "exit=" + str(result.returncode), ""])
+              except Exception as exc:
+                  lines.extend(["$ " + " ".join(command), "ERROR: " + type(exc).__name__, ""])
+          lines.extend(["```", "",
+                        "For security, do not post trading credentials, private keys or environment variables."])
+          body = "\n".join(lines)
+          repository = os.environ["REPOSITORY"]
+          issue = int(os.environ["ISSUE_NUMBER"])
+          token = os.environ["GITHUB_TOKEN"]
+          url = f"https://api.github.com/repos/{repository}/issues/{issue}/comments"
+          payload = json.dumps({"body": body}).encode("utf-8")
+          req = urllib.request.Request(
+              url, data=payload, method="POST",
+              headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+                  "Content-Type": "application/json",
+                  "User-Agent": "abutron-readonly-health",
+              })
+          with urllib.request.urlopen(req, timeout=20) as response:
+              print("Read-only health results posted to GitHub issue. Status:", response.status)
+          PY
