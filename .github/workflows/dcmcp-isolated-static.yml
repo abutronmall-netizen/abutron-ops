@@ -1,0 +1,41 @@
+name: ABUTRON Desktop Commander Offline Installer Checks
+
+on:
+  pull_request:
+    paths:
+      - 'ops/mcp_gateway/install-isolated-node-v1.sh'
+      - '.github/workflows/abutron-dcmcp-local-smoke-v1.yml'
+      - '.github/workflows/dcmcp-isolated-static.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check isolated installer syntax and pinned trusted hash
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          file=ops/mcp_gateway/install-isolated-node-v1.sh
+          bash -n "$file"
+          grep -Fq 'VERSION=v22.23.4' "$file"
+          grep -Fq 'SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce' "$file"
+          grep -Fq 'sha256sum --check --status' "$file"
+          grep -Fq 'DEST="${ROOT}/node"' "$file"
+          ! grep -Eq 'curl.*[|].*(bash|sh)|apt(-get)? (install|upgrade)|npm.* -g|systemctl (enable|start)' "$file"
+          python3 - <<'PY'
+          from pathlib import Path
+          file=Path(".github/workflows/abutron-dcmcp-local-smoke-v1.yml").read_text()
+          start="          python3 - <<'PY'\n"
+          end="\n          PY\n"
+          assert start in file and end in file
+          part=file.split(start,1)[1].split(end,1)[0]
+          program="\n".join(s[10:] if s.startswith("          ") else s
+                            for s in part.splitlines()) + "\n"
+          compile(program, "mcp-local-smoke", "exec")
+          assert '"tools/list"' in program
+          assert '"tools/call"' not in program
+          print("ISOLATED_NODE_INSTALLER_AND_LOCAL_MCP_SMOKE_STATIC_PASS")
+          PY
