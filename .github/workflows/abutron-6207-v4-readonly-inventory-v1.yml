@@ -1,0 +1,169 @@
+name: ABUTRON 6207 V4 Readonly Inventory V1
+
+# No checkout, sudo, user-controlled shell inputs, deployment or trading action.
+# Owner-only issue allows a narrowly bounded production file/process inspection.
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-6207-v4-readonly-inventory
+  cancel-in-progress: false
+
+jobs:
+  verify-6207-v4:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS VERIFY 6207 V4 V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Audit read-only MT5 V4 artifacts and 6207 service state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import stat
+          import subprocess
+          import time
+          from pathlib import Path
+
+          # Compare binary bytes, not the name of an .ex5. Absence of a
+          # matching file is NOT proof that an inaccessible MT5 chart is empty.
+          V4_SHA = "458afad273cb5c2446f52d766d2617cc277bca6b1e990450bb6955c2da64973a"
+          QA = Path("/var/lib/abutron-gh-runner/abutron-unapproved-qa-evidence/deriv6207-v4-guardian-20261108/AbutronApexExistingDerivV4_6207.ex5.UNAPPROVED")
+          ROOTS = (
+              Path("/opt/apex-client-mt5"),
+              Path("/opt/apex"),
+              Path("/opt/abutron"),
+              Path("/home/dcagent"),
+              Path("/var/lib/abutron-gh-runner/abutron-unapproved-qa-evidence"),
+          )
+          EXCLUDE = {".git", "node_modules", "__pycache__", ".cache",
+                     "site-packages", ".venv", "venv", "backups"}
+          START = time.monotonic()
+          MAX_SECONDS = 24
+          MAX_DIRS = 16000
+          MAX_EX5 = 1000
+          scan_dirs = 0
+          inspected_ex5 = 0
+          matches = 0
+          read_errors = 0
+          timeout_or_cap = False
+
+          def digest(path):
+              # Direct regular files only; no unbounded files or symlink reads.
+              st = path.lstat()
+              if not stat.S_ISREG(st.st_mode) or st.st_size > 5_000_000:
+                  raise ValueError("UNREADABLE_OR_UNSAFE_CANDIDATE")
+              fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+              try:
+                  before = os.fstat(fd)
+                  if not stat.S_ISREG(before.st_mode) or before.st_ino != st.st_ino:
+                      raise ValueError("CHANGED_CANDIDATE")
+                  h = hashlib.sha256()
+                  while True:
+                      block = os.read(fd, 65536)
+                      if not block:
+                          break
+                      h.update(block)
+                  after = os.fstat(fd)
+                  if (before.st_size != after.st_size or
+                          before.st_mtime_ns != after.st_mtime_ns):
+                      raise ValueError("RACED_CANDIDATE")
+                  return h.hexdigest()
+              finally:
+                  os.close(fd)
+
+          try:
+              qa_match = digest(QA) == V4_SHA
+          except (OSError, ValueError):
+              qa_match = False
+              read_errors += 1
+          print("PRESERVED_UNAPPROVED_QA_SHA_MATCH=" + ("YES" if qa_match else "UNVERIFIED"))
+
+          for root in ROOTS:
+              if not root.is_dir() or root.is_symlink():
+                  read_errors += 1
+                  continue
+              def err(_):
+                  global read_errors
+                  read_errors += 1
+              for dirname, subdirs, files in os.walk(root, topdown=True,
+                                                       followlinks=False, onerror=err):
+                  scan_dirs += 1
+                  if (scan_dirs >= MAX_DIRS or
+                          time.monotonic() - START > MAX_SECONDS):
+                      timeout_or_cap = True
+                      break
+                  subdirs[:] = [x for x in subdirs
+                                if x not in EXCLUDE and
+                                not os.path.islink(os.path.join(dirname, x))]
+                  path = Path(dirname)
+                  parts = path.parts
+                  # Only installed MT5 Expert directories, not archived builds.
+                  if "MQL5" not in parts or "Experts" not in parts:
+                      continue
+                  for name in files:
+                      if not name.lower().endswith(".ex5"):
+                          continue
+                      if inspected_ex5 >= MAX_EX5:
+                          timeout_or_cap = True
+                          break
+                      inspected_ex5 += 1
+                      try:
+                          if digest(path / name) == V4_SHA:
+                              matches += 1
+                      except (OSError, ValueError):
+                          read_errors += 1
+                  if timeout_or_cap:
+                      break
+              if timeout_or_cap:
+                  break
+
+          # No command-line arguments printed (they may contain private data).
+          mt5_count = 0
+          for entry in Path("/proc").iterdir():
+              if not entry.name.isdecimal():
+                  continue
+              try:
+                  comm = (entry / "comm").read_text()[:80].lower()
+                  if "terminal64.exe" in comm or "terminal.exe" in comm:
+                      mt5_count += 1
+              except (OSError, UnicodeError):
+                  pass
+
+          print("V4_SHA_MATCHES_IN_READABLE_MT5_EXPERT_DIRS=" + str(matches))
+          print("READABLE_EX5_FILES_CHECKED=" + str(inspected_ex5))
+          print("DIRECTORIES_VISITED=" + str(scan_dirs))
+          print("PATH_READ_ERRORS=" + str(read_errors))
+          print("INVENTORY_COMPLETE=" + ("NO" if read_errors or timeout_or_cap else "YES"))
+          print("MT5_PROCESS_COUNT_OBSERVED=" + str(mt5_count))
+          for unit in ("abutron-native-readonly-mt5-6207.service",
+                       "abutron-6207-multi-trial-dispatch.service",
+                       "abutron-6207-one-shot-dispatch.service"):
+              p = subprocess.run(
+                  ["systemctl", "show", unit, "-p", "ActiveState", "-p",
+                   "SubState", "-p", "Result", "--no-pager"],
+                  text=True, capture_output=True, timeout=6, check=False)
+              values = {}
+              for line in p.stdout.splitlines():
+                  if "=" in line:
+                      k, v = line.split("=", 1)
+                      if k in ("ActiveState", "SubState", "Result") and v.isascii() and v.replace("-", "").isalpha() and len(v) <= 30:
+                          values[k] = v
+              print("SERVICE_STATE", unit, values.get("ActiveState", "UNVERIFIED"),
+                    values.get("Result", "UNVERIFIED"))
+          print("V4_CHART_ATTACHMENT=UNVERIFIED_REQUIRES_BROKER_EA_ATTESTATION")
+          print("V4_ORDER_AUTHORIZATION=NOT_TESTED_NO_TRADES")
+          PY
