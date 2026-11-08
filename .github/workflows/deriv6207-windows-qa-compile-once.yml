@@ -1,0 +1,131 @@
+name: ABUTRON 6207 Windows Native V4 Compiler QA
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: read
+concurrency:
+  group: abutron-6207-v4-windows-qa
+  cancel-in-progress: false
+jobs:
+  verify-source:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 WINDOWS V4 COMPILER QA V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify source and include before short-lived private transfer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          src="$GITHUB_WORKSPACE/v4-qa-input/AbutronApexExistingDerivV4_6207.mq5"
+          include=/var/lib/abutron-apex11-source-handoff/AdaptiveRiskProofV2.mqh
+          [[ -f "$include" && ! -L "$include" && -f "$src" && ! -L "$src" ]] || exit 10
+          [[ "$(sha256sum "$include" | cut -d' ' -f1)" == "e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44" ]] || exit 11
+          [[ "$(git hash-object "$src")" == "b2ba33416105e5719b740d164be8cd45561b80f9" ]] || exit 12
+          python3 - "$src" "$include" <<'PY'
+          import pathlib,re,sys
+          for name in sys.argv[1:]:
+              p=pathlib.Path(name)
+              if p.stat().st_size>160000:raise SystemExit("SOURCE_UNEXPECTED_SIZE")
+              data=p.read_text(encoding="utf-8-sig",errors="replace")
+              secret=re.compile(r'-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY|(?:password|passwd|api[_-]?key|api[_-]?secret|access[_-]?token)\s*[=:]\s*["\x27][^"\x27]{8,}',re.I)
+              if secret.search(data):raise SystemExit("SOURCE_SECRET_PATTERN_REQUIRES_MANUAL_REVIEW")
+          print("BOTH_SOURCES_VERIFIED_NO_SECRET_PATTERN_MATCHED")
+          PY
+          folder="$RUNNER_TEMP/abutron6207-v4-win-source"
+          mkdir -m 0700 "$folder"
+          install -m 0600 "$src" "$folder/AbutronApexExistingDerivV4_6207.mq5"
+          install -m 0600 "$include" "$folder/AdaptiveRiskProofV2.mqh"
+          echo "SOURCE_EXPORT_VERIFIED_QA_ONLY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abutron6207-v4-source-qa
+          path: ${{ runner.temp }}/abutron6207-v4-win-source/
+          if-no-files-found: error
+          retention-days: 1
+  compile-windows:
+    needs: verify-source
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: abutron6207-v4-source-qa
+          path: ${{ runner.temp }}\abutron6207-v4-source
+      - name: Authenticate source and download official signed MetaQuotes installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'abutron6207-v4-source'
+          $src=Join-Path $root 'AbutronApexExistingDerivV4_6207.mq5'
+          $inc=Join-Path $root 'AdaptiveRiskProofV2.mqh'
+          if (!(Test-Path $src) -or !(Test-Path $inc)) {throw 'QA_SOURCE_MISSING'}
+          $sha=(Get-FileHash $inc -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne 'e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44'){throw 'INCLUDE_HASH_MISMATCH'}
+          $blob=(& git hash-object $src).Trim()
+          if ($blob -ne 'b2ba33416105e5719b740d164be8cd45561b80f9'){throw 'EA_SOURCE_GIT_HASH_MISMATCH'}
+          Write-Host 'VERIFIED_EXACT_EA_AND_HEADER_ONLY'
+          $installer=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+          Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $installer -MaximumRedirection 3
+          $sig=Get-AuthenticodeSignature $installer
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'MetaQuotes'){throw 'UNVERIFIED_INSTALLER_SIGNATURE'}
+          Write-Host ('OFFICIAL_METAQUOTES_INSTALLER_SHA256='+(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant())
+          Write-Host 'NO_BROKER_CREDENTIALS_NO_PRODUCTION_ACCESS'
+      - name: Install only on disposable Windows VM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+          $p=Start-Process -FilePath $setup -ArgumentList '/auto' -PassThru
+          if (!$p.WaitForExit(210000)) {try {$p.Kill()} catch {}; throw 'METAQUOTES_INSTALL_TIMEOUT'}
+          Write-Host ('INSTALLER_LAUNCHER_EXIT='+$p.ExitCode)
+          $candidates=@('C:\Program Files\MetaTrader 5\metaeditor64.exe','C:\Program Files (x86)\MetaTrader 5\metaeditor64.exe',(Join-Path $env:LOCALAPPDATA 'Programs\MetaTrader 5\metaeditor64.exe'))
+          $editor=$null
+          for ($i=0;$i -lt 36;$i++){
+            foreach ($path in $candidates){if (Test-Path $path){$editor=$path;break}}
+            if($editor){break}
+            Start-Sleep -Seconds 5
+          }
+          if (!$editor){throw 'DISPOSABLE_WINDOWS_METAEDITOR_MISSING'}
+          $sig=Get-AuthenticodeSignature $editor
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'MetaQuotes'){throw 'METAEDITOR_SIGNATURE_INVALID'}
+          $editor | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'abutron-metaeditor-path.txt') -Encoding ascii
+          Write-Host ('SIGNED_WINDOWS_METAEDITOR_SHA256='+(Get-FileHash $editor -Algorithm SHA256).Hash.ToLowerInvariant())
+      - name: Compile V4 source in QA only, no EX5 deployment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'abutron6207-v4-source'
+          $src=Join-Path $root 'AbutronApexExistingDerivV4_6207.mq5'
+          $editor=(Get-Content (Join-Path $env:RUNNER_TEMP 'abutron-metaeditor-path.txt') -Raw).Trim()
+          $p=Start-Process -FilePath $editor -ArgumentList ('/compile:"'+$src+'"'),'/log' -PassThru
+          if (!$p.WaitForExit(180000)){try {$p.Kill()} catch {};throw 'WINDOWS_COMPILE_TIMEOUT'}
+          Write-Host ('METAEDITOR_EXIT='+$p.ExitCode)
+          $log=[IO.Path]::ChangeExtension($src,'.log')
+          $ex5=[IO.Path]::ChangeExtension($src,'.ex5')
+          if (!(Test-Path $log)){throw 'COMPILE_LOG_MISSING'}
+          $lines=Get-Content $log
+          Write-Host ('COMPILER_LOG_LINES='+$lines.Count)
+          foreach($line in ($lines | Where-Object {$_ -match '(?i)error|warning|result|compil'} | Select-Object -Last 16)){
+            $safe=($line -replace '[\r\n]',' ')
+            Write-Host ('COMPILER_STATUS='+$safe.Substring(0,[Math]::Min(220,$safe.Length)))
+          }
+          if ($p.ExitCode -ne 0 -or !(Test-Path $ex5)){throw 'QA_MQL5_COMPILE_FAILED'}
+          Write-Host ('QA_EX5_SHA256='+(Get-FileHash $ex5 -Algorithm SHA256).Hash.ToLowerInvariant())
+          Write-Host ('QA_EX5_BYTES='+(Get-Item $ex5).Length)
+          Write-Host 'QA_COMPILATION_ONLY_NO_MT5_BROKER_OR_TRADING'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abutron6207-v4-unapproved-qa-binary
+          path: |
+            ${{ runner.temp }}\abutron6207-v4-source\AbutronApexExistingDerivV4_6207.ex5
+            ${{ runner.temp }}\abutron6207-v4-source\AbutronApexExistingDerivV4_6207.log
+          if-no-files-found: error
+          retention-days: 1
