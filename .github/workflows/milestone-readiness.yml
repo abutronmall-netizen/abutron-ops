@@ -1,0 +1,151 @@
+name: ABUTRON Milestone Readiness (read-only)
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: none
+  issues: read
+
+concurrency:
+  group: abutron-milestone-readiness-v1
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON MILESTONE READINESS V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 5
+    steps:
+      - name: Fixed allowlisted, secret-redacted, read-only broker and platform audit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/python3 - <<'PY'
+          import hashlib, json, os, re, sqlite3, stat, subprocess, time
+          from pathlib import Path
+          
+          if os.geteuid() != 0:
+              raise SystemExit("ROOT_READONLY_AUDIT_REQUIRED")
+          now = time.time()
+          print("ABUTRON_MILESTONE_READINESS_V1")
+          print("audit_utc", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)))
+          units = [
+              "abutron-apex-native-orders.timer",
+              "abutron-apex-native-orders.service",
+              "abutron-apex-activation-ack.service",
+              "abutron-apex-native-signal-router.timer",
+              "abutron-native-readonly-mt5-6207.service",
+              "abutron-client-mt5-d6fc2524ec373b8d1bc278a8be3ec635.service",
+              "fp-native-history-readonly.service",
+              "abutron-fpmarkets-native-feed.service",
+              "abutron-quant-deriv-demo-dispatch.timer",
+              "apex-client-portal.service",
+              "apex-signup.service",
+              "abutron-v7-api.service",
+          ]
+          for unit in units:
+              try:
+                  p = subprocess.run(
+                      ["systemctl", "show", unit, "--no-pager", "-p",
+                       "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Result"],
+                      text=True, capture_output=True, timeout=7, check=False,
+                  )
+                  data = dict(line.split("=", 1) for line in p.stdout.splitlines() if "=" in line)
+                  print("unit", unit, "load", data.get("LoadState","?"),
+                        "active", data.get("ActiveState","?"),
+                        "sub", data.get("SubState","?"), "result", data.get("Result","?"))
+              except Exception as exc:
+                  print("unit_diagnostic_error", unit, type(exc).__name__)
+          
+          for label, pathname in [
+              ("native_writer", "/opt/apex-client-mt5/apex_native_order_runtime.py"),
+              ("old_router", "/opt/apex-client-mt5/apex_signal_native_router_v1.py"),
+              ("fp_history_collector", "/opt/apex-client-mt5/fpmarkets-history/fp_native_history_collect.py"),
+              ("fp_history_indicator_source_backup",
+               "/var/backups/abutron-fp-native-bridge-prestage-20261104T182821Z/files/home/dcagent/abutron-fp-history-staging-20261104/AbutronFPAccountHistoryV100.mq5"),
+          ]:
+              try:
+                  p = Path(pathname)
+                  st = p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or st.st_size > 4_000_000:
+                      raise ValueError("UNEXPECTED_SOURCE_TYPE_OR_SIZE")
+                  print("code", label, "sha256", hashlib.sha256(p.read_bytes()).hexdigest(),
+                        "size", st.st_size)
+              except Exception as exc:
+                  print("code_unverified", label, type(exc).__name__)
+          
+          def read_health(label, pathname):
+              try:
+                  p = Path(pathname)
+                  st = p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or st.st_size > 15000:
+                      raise ValueError("UNTRUSTED_HEALTH_FILE")
+                  d = json.loads(p.read_text())
+                  status = d.get("status")
+                  if type(status) is not str or not re.fullmatch("[A-Z_]{3,60}", status):
+                      status = "UNKNOWN"
+                  print("worker", label, "status", status,
+                        "age_s", int(now - st.st_mtime),
+                        "heartbeat_fresh", d.get("heartbeat_fresh") is True,
+                        "native_identity_verified", d.get("broker_session_identity_verified") is True)
+                  return d
+              except Exception as exc:
+                  print("worker_unverified", label, type(exc).__name__)
+                  return None
+          
+          read_health("deriv_6207_primary", "/var/lib/private/abutron-client-mt5-d6fc2524ec373b8d1bc278a8be3ec635/worker-health.json")
+          read_health("deriv_6207_sidecar", "/var/lib/private/abutron-native-readonly-mt5-6207/worker-health.json")
+          fp = read_health("fp_demo_target", "/var/lib/private/abutron-client-mt5-35b81a287b6a030f2f46ff426b135e6c/worker-health.json")
+          if fp is not None:
+              try:
+                  nonce = fp.get("nonce", "")
+                  if type(nonce) is not str or not re.fullmatch("[a-f0-9]{32}",nonce):
+                      raise ValueError("FP_NONCE_INVALID")
+                  p = Path("/var/lib/private/abutron-client-mt5-35b81a287b6a030f2f46ff426b135e6c/terminal/MQL5/Files") / ("ABUTRON_FP_ACCOUNT_HISTORY_V1_" + nonce + ".txt")
+                  st=p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or st.st_size>4000000:
+                      raise ValueError("FP_SOURCE_INVALID")
+                  with p.open("rb") as f:
+                      head=[f.readline().decode("utf-8-sig").strip() for _ in range(20)]
+                  end=int(head[18]);offset=int(head[7])
+                  print("fp_history_file_age_s",int(now-st.st_mtime),
+                        "native_export_end_utc_age_s",int(now-(end-offset)),
+                        "server_offset_s",offset,
+                        "native_tag_valid",head[19]=="BROKER_NATIVE_NO_ORDER_FUNCTIONS")
+              except Exception as exc:
+                  print("fp_history_unverified",type(exc).__name__)
+          
+          try:
+              db=sqlite3.connect("file:/var/lib/apex-signup/accounts.sqlite3?mode=ro",uri=True,timeout=4)
+              db.execute("PRAGMA query_only=ON")
+              rows=db.execute("""SELECT a.broker,a.environment,COUNT(*),
+                SUM(COALESCE(t.desired_enabled,0)), SUM(COALESCE(t.effective_enabled,0))
+                FROM apex_mt5_connections a LEFT JOIN apex_trade_controls t
+                ON a.id=t.connection_id GROUP BY a.broker,a.environment""").fetchall()
+              print("broker_connection_groups",len(rows))
+              for broker,environment,count,desired,effective in rows:
+                  if broker in ("Deriv","FP Markets","IC Markets") and environment in ("DEMO","LIVE"):
+                      print("broker_summary",broker.replace(" ","_"),environment,
+                            "accounts",count,"desired_on",desired,"effective_on",effective)
+              db.close()
+          except Exception as exc:
+              print("broker_account_summary_unverified",type(exc).__name__)
+          
+          logs = sorted(Path("/var/log").glob("abutron-full-backup-*.log"),
+                        key=lambda p:p.stat().st_mtime,reverse=True)
+          print("backup_log_count",len(logs),"newest_age_s",
+                int(now-logs[0].stat().st_mtime) if logs else "UNVERIFIED")
+          staging=Path("/opt/abutron-apex11-staging")
+          print("apex11_staging_exists",staging.is_dir())
+          sudo=Path("/etc/sudoers.d/90-abutron-github")
+          if sudo.is_file():
+              print("runner_unrestricted_sudo", "NOPASSWD: ALL" in sudo.read_text())
+          else:
+              print("runner_unrestricted_sudo",False)
+          print("AUDIT_FINISHED_READONLY_NO_TRADING_ACTIONS")
+          PY
