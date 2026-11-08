@@ -1,0 +1,88 @@
+name: ABUTRON Verified OpenAI Tunnel Client Install V1
+
+# Install ONLY the pinned official OpenAI tunnel-client binary on localhost.
+# Does not configure/activate a tunnel or execute any MCP tools.
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-official-tunnel-install-v1
+  cancel-in-progress: false
+
+jobs:
+  install:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS INSTALL OFFICIAL MCP TUNNEL V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 6
+    steps:
+      - name: Download, verify, and install official pinned Linux tunnel-client
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          DEST=/usr/local/bin/tunnel-client
+          if sudo -n /usr/bin/test -e "$DEST" || sudo -n /usr/bin/test -L "$DEST"; then
+            echo 'TUNNEL_DEST_ALREADY_EXISTS_REFUSE_OVERWRITE'
+            exit 2
+          fi
+          work="$(mktemp -d /tmp/abutron-official-tunnel.XXXXXXXX)"
+          trap 'rm -rf -- "$work"' EXIT
+          readonly asset_url='https://github.com/openai/tunnel-client/releases/download/v0.0.20/tunnel-client-v0.0.20-linux-amd64.zip'
+          readonly asset_sha='2f06ce5a17425c74a827e7038692936e973ae388e7eec728c40efee1fb5f139d'
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+            --connect-timeout 15 --max-time 160 --retry 2 \
+            --output "$work/tunnel-client.zip" "$asset_url"
+          printf '%s  %s\n' "$asset_sha" "$work/tunnel-client.zip" |
+            sha256sum --check --status
+          echo 'OFFICIAL_TUNNEL_CLIENT_RELEASE_SHA256_PASS=v0.0.20'
+          python3 - "$work/tunnel-client.zip" "$work/tunnel-client" <<'PY'
+          import os
+          import pathlib
+          import stat
+          import sys
+          import zipfile
+          source=pathlib.Path(sys.argv[1])
+          dest=pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(source) as z:
+              entries=[i for i in z.infolist()
+                  if pathlib.PurePosixPath(i.filename).name=="tunnel-client"
+                  and not i.is_dir()]
+              if len(entries)!=1 or entries[0].file_size>110_000_000:
+                  raise SystemExit("OFFICIAL_TUNNEL_ARCHIVE_UNEXPECTED_LAYOUT")
+              with z.open(entries[0]) as f:
+                  payload=f.read(110_000_001)
+              if (len(payload)>110_000_000 or
+                  payload[:4] != b"\x7fELF" or
+                  len(payload)<24 or
+                  payload[4]!=2 or payload[5]!=1 or
+                  int.from_bytes(payload[18:20],"little")!=62):
+                  raise SystemExit("OFFICIAL_TUNNEL_BINARY_NOT_LINUX_X64")
+          fd=os.open(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o700)
+          with os.fdopen(fd,"wb") as f:
+              f.write(payload)
+              f.flush()
+              os.fsync(f.fileno())
+          print("VERIFIED_OFFICIAL_ELF_LINUX_X64=YES")
+          PY
+          sudo -n /usr/bin/test ! -e "$DEST"
+          sudo -n /usr/bin/install -o root -g root -m 0755 \
+            "$work/tunnel-client" "$DEST"
+          test "$(sudo -n /usr/bin/stat -c '%u:%g %a' "$DEST")" = '0:0 755'
+          test ! -L "$DEST"
+          "$DEST" help quickstart >/dev/null
+          echo 'OFFICIAL_TUNNEL_CLIENT_INSTALLED_AND_HELP_PASS=YES'
+          echo 'NO_TUNNEL_ID_OR_API_KEY_CONFIGURED'
+          echo 'NO_MCP_OR_TRADING_SERVICE_STARTED'
