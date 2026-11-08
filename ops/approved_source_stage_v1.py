@@ -38,6 +38,7 @@ SOURCE_PREFIXES = (
     "apex11/tests/",
     "risk_guard/",
 )
+HEX40 = re.compile(r"[a-f0-9]{40}\Z")
 HEX64 = re.compile(r"[a-f0-9]{64}\Z")
 HEX_SNAPSHOT = re.compile(r"[a-f0-9]{8,64}\Z")
 SAFE_REL = re.compile(r"[a-zA-Z0-9._/-]{1,230}\Z")
@@ -166,7 +167,7 @@ def _store_state() -> dict:
     for key in ("current", "previous"):
         if state[key] is not None and (
             not isinstance(state[key], str)
-            or HEX64.fullmatch(state[key]) is None):
+            or HEX40.fullmatch(state[key]) is None):
             raise Blocked("CORRUPT_INACTIVE_STATE_RELEASE")
     return state
 
