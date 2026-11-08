@@ -1,0 +1,123 @@
+name: ABUTRON 6207 Guardian V4 Isolated Windows Compiler
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: read
+concurrency:
+  group: abutron-6207-guardian-qa
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 V4 GUARDIAN WINDOWS COMPILE V1'
+    runs-on: [self-hosted,linux,x64,abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exact QA native source/include verification; no server changes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          src="$GITHUB_WORKSPACE/v4-guardian-qa/AbutronApexExistingDerivV4_6207.mq5"
+          inc="/var/lib/abutron-apex11-source-handoff/AdaptiveRiskProofV2.mqh"
+          [[ -f "$src" && ! -L "$src" && -f "$inc" && ! -L "$inc" ]] || exit 11
+          [[ "$(git hash-object "$src")" == "244cbaa71164bc2fe9abcb2d869d4bfd1b846aae" ]] || exit 12
+          [[ "$(sha256sum "$inc" | cut -d' ' -f1)" == "e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44" ]] || exit 13
+          python3 - "$src" "$inc" <<'PY'
+          import pathlib,re,sys
+          for fn in sys.argv[1:]:
+            p=pathlib.Path(fn)
+            if p.stat().st_size>180000:raise SystemExit('SOURCE_SIZE_MISMATCH')
+            s=p.read_text(encoding='utf-8-sig',errors='replace')
+            if re.search(r'-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY|(?:password|passwd|api[_-]?secret|access[_-]?token)\s*[=:]\s*["\x27][^"\x27]{8,}',s,re.I):
+              raise SystemExit('POTENTIAL_EMBEDDED_SECRETS')
+          print('GUARDIAN_SOURCE_VERIFIED_NO_EMBEDDED_SECRET_PATTERN')
+          PY
+          dest="$RUNNER_TEMP/abutron-guardian-qa-src"
+          mkdir -m 0700 "$dest"
+          install -m 0600 "$src" "$dest/AbutronApexExistingDerivV4_6207.mq5"
+          install -m 0600 "$inc" "$dest/AdaptiveRiskProofV2.mqh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abutron6207-guardian-source
+          path: ${{ runner.temp }}/abutron-guardian-qa-src/
+          retention-days: 1
+          if-no-files-found: error
+  compile:
+    needs: stage
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: abutron6207-guardian-source
+          path: ${{ runner.temp }}\abutron-guardian-qa-src
+      - name: Authenticate source and MetaQuotes installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'abutron-guardian-qa-src'
+          $src=Join-Path $root 'AbutronApexExistingDerivV4_6207.mq5'
+          $inc=Join-Path $root 'AdaptiveRiskProofV2.mqh'
+          if (!(Test-Path $src) -or !(Test-Path $inc)) {throw 'SOURCES_MISSING'}
+          if ((& git hash-object $src).Trim() -ne '244cbaa71164bc2fe9abcb2d869d4bfd1b846aae'){throw 'SOURCE_BLOB_MISMATCH'}
+          if ((Get-FileHash $inc -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44'){throw 'INCLUDE_SHA_MISMATCH'}
+          $setup=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
+          Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $setup -MaximumRedirection 3
+          $sig=Get-AuthenticodeSignature -FilePath $setup
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'MetaQuotes'){throw 'UNTRUSTED_SIGNER'}
+          Write-Host 'OFFICIAL_SIGNED_METAQUOTES_INSTALLER_VALIDATED'
+      - name: Install only on disposable Windows QA runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p=Start-Process -FilePath (Join-Path $env:RUNNER_TEMP 'mt5setup.exe') -ArgumentList '/auto' -PassThru
+          if (!$p.WaitForExit(210000)){try {$p.Kill()} catch {};throw 'QA_INSTALLER_TIMEOUT'}
+          $paths=@('C:\Program Files\MetaTrader 5\metaeditor64.exe','C:\Program Files (x86)\MetaTrader 5\metaeditor64.exe',(Join-Path $env:LOCALAPPDATA 'Programs\MetaTrader 5\metaeditor64.exe'))
+          $editor=$null
+          for($i=0;$i -lt 30;$i++){
+            foreach($path in $paths){if(Test-Path $path){$editor=$path;break}}
+            if($editor){break}
+            Start-Sleep -Seconds 5
+          }
+          if(!$editor){throw 'QA_METAEDITOR_NOT_FOUND'}
+          $sig=Get-AuthenticodeSignature -FilePath $editor
+          if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'MetaQuotes'){throw 'QA_METAEDITOR_UNTRUSTED'}
+          $editor | Set-Content -Path (Join-Path $env:RUNNER_TEMP 'qa-editor.txt')
+      - name: Compile source only; inspect compiler log and EX5 bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $src=Join-Path $env:RUNNER_TEMP 'abutron-guardian-qa-src\AbutronApexExistingDerivV4_6207.mq5'
+          $editor=(Get-Content (Join-Path $env:RUNNER_TEMP 'qa-editor.txt') -Raw).Trim()
+          $p=Start-Process -FilePath $editor -ArgumentList ('/compile:"'+$src+'"'),'/log' -PassThru
+          if (!$p.WaitForExit(180000)){try {$p.Kill()} catch {};throw 'QA_COMPILE_TIMEOUT'}
+          $log=[IO.Path]::ChangeExtension($src,'.log')
+          $ex5=[IO.Path]::ChangeExtension($src,'.ex5')
+          if(!(Test-Path $log)){throw 'QA_COMPILER_LOG_ABSENT'}
+          $lines=Get-Content $log
+          Write-Host ('METAEDITOR_PROCESS_EXIT='+$p.ExitCode)
+          foreach($line in ($lines | Where-Object {$_ -match '(?i)error|warning|Result:'} | Select-Object -Last 30)){
+            $safe=($line -replace '[\r\n]',' ')
+            Write-Host ('QA_DIAGNOSTIC='+$safe.Substring(0,[Math]::Min(220,$safe.Length)))
+          }
+          $success=($lines | Where-Object {$_ -match 'Result:\s*0 errors,\s*0 warnings'} | Select-Object -Last 1)
+          if(!$success -or !(Test-Path $ex5) -or (Get-Item $ex5).Length -lt 1000){throw 'QA_V4_NATIVE_COMPILE_NOT_CLEAN'}
+          Write-Host ('QA_NATIVE_EX5_SHA256='+(Get-FileHash $ex5 -Algorithm SHA256).Hash.ToLowerInvariant())
+          Write-Host ('QA_NATIVE_EX5_BYTES='+(Get-Item $ex5).Length)
+          Write-Host 'QA_ONLY_NO_MT5_BROKER_OR_PRODUCTION_DEPLOYMENT'
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: abutron6207-guardian-ex5-UNAPPROVED
+          path: |
+            ${{ runner.temp }}\abutron-guardian-qa-src\AbutronApexExistingDerivV4_6207.ex5
+            ${{ runner.temp }}\abutron-guardian-qa-src\AbutronApexExistingDerivV4_6207.log
+          retention-days: 1
+          if-no-files-found: error
