@@ -26,7 +26,7 @@ import tempfile
 
 SOURCE_COMMIT = "68f9815d39eeecbecbc5845e051e5ca2f9ae848c"
 SOURCE_REPO = "abutronmall-netizen/abutron-apex"
-INBOX = Path("/var/lib/abutron-gh-runner/abutron-apex11-source-approval-v1")
+INBOX = Path("/var/lib/abutron-apex11-source-approval-v1")
 STORE = Path("/var/lib/abutron-apex11-inactive-source-v1")
 COMMANDS = {
     "abutron-gh-apex-source-stage-v1": "stage",
