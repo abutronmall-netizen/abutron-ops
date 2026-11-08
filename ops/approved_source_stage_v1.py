@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """ABUTRON fixed, owner-bootstrapped INACTIVE source staging and rollback.
 
 INSTALLATION IS NOT AUTOMATIC. Review on production with a real root operator.
@@ -155,6 +155,8 @@ def _write_json_atomic(path: Path, data: dict) -> None:
 def _store_state() -> dict:
     f = STORE / "state.json"
     if not f.exists():
+        if f.is_symlink():
+            raise Blocked("UNTRUSTED_INACTIVE_STATE_SYMLINK")
         return {"schema": "abutron.inactive.stage.state.v1",
                 "current": None, "previous": None}
     state = read_root_json(f)
@@ -238,6 +240,7 @@ def _rollback() -> str:
     if state["current"] is None:
         raise Blocked("NOTHING_TO_ROLLBACK")
     previous = state["previous"]
+    check_root_owned(STORE / "releases" / state["current"], directory=True)
     if previous is not None:
         check_root_owned(STORE / "releases" / previous, directory=True)
     # Rollback only changes this INACTIVE staging metadata. Preserve both
