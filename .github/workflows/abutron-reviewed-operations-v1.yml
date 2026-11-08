@@ -12,6 +12,7 @@ on:
         options:
           - verify-host
           - verify-staging
+          - verify-native-services
           - stage-approved-source
           - rollback-staged-source
   issues:
@@ -99,6 +100,96 @@ jobs:
           test "$(id -un)" = 'abutrongha'
           test "$(id -u)" -ne 0
           sudo -n /usr/local/sbin/abutron-gh-apex-staging-verify
+
+  verify-native-services:
+    # Fixed, sanitized systemd status + known error code counts only.
+    # No raw journal text, variables, auth records or broker P/L are printed.
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      ((github.event_name == 'workflow_dispatch' &&
+        inputs.operation == 'verify-native-services') ||
+       (github.event_name == 'issues' &&
+        github.event.issue.user.login == 'abutronmall-netizen' &&
+        github.event.issue.title == 'ABUTRON OPS VERIFY NATIVE SERVICES V1'))
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 4
+    steps:
+      - name: Collect fixed systemd status and safe failure categories
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          from collections import Counter
+          import re
+          import subprocess
+
+          UNITS = (
+              "abutron-6207-multi-trial-dispatch.service",
+              "abutron-6207-one-shot-dispatch.service",
+              "abutron-fp-second-native-history.service",
+              "abutron-native-readonly-mt5-7593.service",
+              "abutron-native-readonly-mt5-9244.service",
+              "fp-native-history-readonly.service",
+              "abutron-native-readonly-mt5-6207.service",
+              "abutron-fpmarkets-native-feed.service",
+              "abutron-fpmarkets-native-feed.timer",
+          )
+          FIELDS = ("LoadState", "ActiveState", "SubState", "Result",
+                    "ExecMainStatus", "ExecMainCode", "NRestarts")
+          # An allowlist of known non-secret failure identifiers, not raw logs.
+          REASONS = re.compile(
+              r"\b(?:FP_HISTORY_SELECTION_INVALID|"
+              r"BROKER_CLOCK_OFFSET_UNVERIFIED|"
+              r"NO_CONNECTED_MATCHING_FP_WORKER|"
+              r"FP_HISTORY_LAST_QUOTE_STALE|"
+              r"NO_FRESH_QUALIFIED_SIGNAL|"
+              r"V4_ROOT_ACTIVATION_SUPERVISOR_NOT_ATTESTED|"
+              r"ROOT_DEMO_OPERATOR_CUTOVER_NOT_APPROVED|"
+              r"NO_FRESH_CANDIDATES|"
+              r"DISPATCH_NOT_AUTHORIZED|"
+              r"NATIVE_BROKER_AUTHENTICATION_MISSING|"
+              r"TERMINAL_NOT_CONNECTED|"
+              r"NO_MATCHED_WORKER|"
+              r"MT5_TIMEOUT|"
+              r"NO_BROKER_PROTECTED_POSITION|"
+              r"V4_REVISION_FENCED_EXCLUSIVE_NATIVE_EA_NOT_VERIFIED)\b"
+          )
+          for unit in UNITS:
+              print("UNIT", unit)
+              command = ["systemctl", "show", unit]
+              for field in FIELDS:
+                  command.extend(["-p", field])
+              try:
+                  p = subprocess.run(command, text=True, capture_output=True,
+                                     check=False, timeout=8)
+                  if p.returncode != 0:
+                      print("STATUS_UNAVAILABLE", p.returncode)
+                  else:
+                      for line in p.stdout.splitlines():
+                          if any(line.startswith(key + "=") for key in FIELDS):
+                              # Re-parse and bound the value before logging.
+                              key, value = line.split("=", 1)
+                              if re.fullmatch(r"[A-Za-z0-9_.:/ -]{0,80}", value):
+                                  print(key + "=" + value)
+                  q = subprocess.run(
+                      ["journalctl", "--no-pager", "-o", "cat", "-n", "200",
+                       "-u", unit], text=True, capture_output=True,
+                      check=False, timeout=8)
+                  if q.returncode != 0:
+                      print("JOURNAL_NOT_ACCESSIBLE")
+                  else:
+                      # Never display unfiltered log lines or exception text.
+                      counts = Counter(REASONS.findall(q.stdout[-120000:]))
+                      for reason, count in sorted(counts.items()):
+                          print("SANITIZED_REASON", reason, count)
+              except (OSError, subprocess.TimeoutExpired):
+                  print("FIXED_READ_ONLY_PROBE_UNAVAILABLE")
+          PY
 
   stage-approved-source:
     # Manual dispatch only; NOT an instruction to promote active MT5 binaries.
