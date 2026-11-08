@@ -28,7 +28,7 @@ jobs:
           include=/var/lib/abutron-apex11-source-handoff/AdaptiveRiskProofV2.mqh
           [[ -f "$include" && ! -L "$include" && -f "$src" && ! -L "$src" ]] || exit 10
           [[ "$(sha256sum "$include" | cut -d' ' -f1)" == "e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44" ]] || exit 11
-          [[ "$(git hash-object "$src")" == "b2ba33416105e5719b740d164be8cd45561b80f9" ]] || exit 12
+          [[ "$(git hash-object "$src")" == "319c68d825b235ffaaa1eb2b7bdf5b82d35aa838" ]] || exit 12
           python3 - "$src" "$include" <<'PY'
           import pathlib,re,sys
           for name in sys.argv[1:]:
@@ -70,7 +70,7 @@ jobs:
           $sha=(Get-FileHash $inc -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($sha -ne 'e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44'){throw 'INCLUDE_HASH_MISMATCH'}
           $blob=(& git hash-object $src).Trim()
-          if ($blob -ne 'b2ba33416105e5719b740d164be8cd45561b80f9'){throw 'EA_SOURCE_GIT_HASH_MISMATCH'}
+          if ($blob -ne '319c68d825b235ffaaa1eb2b7bdf5b82d35aa838'){throw 'EA_SOURCE_GIT_HASH_MISMATCH'}
           Write-Host 'VERIFIED_EXACT_EA_AND_HEADER_ONLY'
           $installer=Join-Path $env:RUNNER_TEMP 'mt5setup.exe'
           Invoke-WebRequest -Uri 'https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe' -OutFile $installer -MaximumRedirection 3
@@ -117,7 +117,11 @@ jobs:
             $safe=($line -replace '[\r\n]',' ')
             Write-Host ('COMPILER_STATUS='+$safe.Substring(0,[Math]::Min(220,$safe.Length)))
           }
-          if ($p.ExitCode -ne 0 -or !(Test-Path $ex5)){throw 'QA_MQL5_COMPILE_FAILED'}
+          $cleanResult = $lines | Where-Object {$_ -match 'Result:\s*0 errors,\s*0 warnings'} | Select-Object -Last 1
+          if (!(Test-Path $ex5) -or !(Get-Item $ex5).Length -or !$cleanResult) {
+            throw 'QA_MQL5_COMPILE_LOG_OR_EX5_NOT_CLEAN'
+          }
+          Write-Host 'ZERO_MQL5_ERRORS_ZERO_WARNINGS_AND_COMPILED_EX5_VERIFIED'
           Write-Host ('QA_EX5_SHA256='+(Get-FileHash $ex5 -Algorithm SHA256).Hash.ToLowerInvariant())
           Write-Host ('QA_EX5_BYTES='+(Get-Item $ex5).Length)
           Write-Host 'QA_COMPILATION_ONLY_NO_MT5_BROKER_OR_TRADING'
