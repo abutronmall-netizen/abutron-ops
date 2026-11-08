@@ -58,7 +58,7 @@ class InstallerTests(unittest.TestCase):
         from ops import approved_source_stage_v1 as stage
         source = Path(stage.__file__).read_bytes()
         git_blob = sha1(
-            ("blob " + str(len(source)) + "\\0").encode() + source
+            ("blob " + str(len(source)) + "\0").encode() + source
         ).hexdigest()
         self.assertEqual(installer.EXPECTED_GIT_BLOB, git_blob)
         self.assertEqual(stage.INBOX, installer.APPROVAL)
