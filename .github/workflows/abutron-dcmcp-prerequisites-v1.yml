@@ -1,0 +1,115 @@
+name: ABUTRON Desktop Commander Readonly Prerequisites V1
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-desktop-commander-readonly-prerequisites
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS VERIFY DESKTOP COMMANDER V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Read-only local Desktop Commander and tunnel inventory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = "abutrongha"
+          test "$(id -u)" -ne 0
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+
+          candidates = (
+              ("DC_PACKAGE_MAIN", "/opt/abutron-dcmcp/node_modules/@wonderwhy-er/desktop-commander/dist/index.js"),
+              ("DC_PACKAGE_ALT", "/opt/abutron-mcp/node_modules/@wonderwhy-er/desktop-commander/dist/index.js"),
+              ("DC_PACKAGE_MANIFEST", "/opt/abutron-dcmcp/node_modules/@wonderwhy-er/desktop-commander/package.json"),
+              ("DC_WRAPPER", "/usr/local/sbin/abutron-dcmcp"),
+              ("ISOLATED_DC_WRAPPER", "/usr/local/sbin/abutron-dcmcp-isolated"),
+              ("TUNNEL_CLIENT", "/usr/local/bin/tunnel-client"),
+              ("TUNNEL_SERVICE_UNIT", "/etc/systemd/system/abutron-mcp-tunnel.service"),
+              ("TUNNEL_CONFIG_DIRECTORY", "/etc/abutron-mcp"),
+          )
+          for label, pathname in candidates:
+              p=Path(pathname)
+              try:
+                  st=p.lstat()
+                  if stat.S_ISLNK(st.st_mode):
+                      value="SYMLINK_NOT_VERIFIED"
+                  elif stat.S_ISREG(st.st_mode):
+                      value="REGULAR_UID_"+str(st.st_uid)
+                  elif stat.S_ISDIR(st.st_mode):
+                      value="DIRECTORY_UID_"+str(st.st_uid)
+                  else:
+                      value="OTHER"
+              except (OSError,ValueError):
+                  value="ABSENT_OR_INACCESSIBLE"
+              print(label+"="+value)
+
+          p=Path("/opt/abutron-dcmcp/node_modules/@wonderwhy-er/desktop-commander/package.json")
+          try:
+              if not p.is_symlink() and p.stat().st_size <= 200_000:
+                  data=json.loads(p.read_text())
+                  version=data.get("version")
+                  engines=data.get("engines", {})
+                  if isinstance(version,str) and len(version)<80 and all(c.isalnum() or c in ".-+" for c in version):
+                      print("DC_PACKAGE_VERSION="+version)
+                  if isinstance(engines,dict):
+                      node=engines.get("node")
+                      if isinstance(node,str) and len(node)<100 and all(c.isalnum() or c in ">=< .^~|-+" for c in node):
+                          print("DC_DECLARED_NODE_ENGINE="+node)
+          except (OSError,UnicodeError,ValueError,TypeError):
+              print("DC_PACKAGE_METADATA=UNAVAILABLE")
+
+          runtimes=(("GLOBAL_NODE","/usr/bin/node"),
+                    ("ISOLATED_NODE","/opt/abutron-mcp/node/bin/node"),
+                    ("LOCAL_DC_NODE","/opt/abutron-dcmcp/node/bin/node"))
+          for label,pathname in runtimes:
+              try:
+                  p=Path(pathname)
+                  st=p.lstat()
+                  if not stat.S_ISREG(st.st_mode) or not os.access(pathname,os.X_OK):
+                      print(label+"=NOT_REGULAR_EXECUTABLE")
+                      continue
+                  proc=subprocess.run([pathname,"--version"],capture_output=True,text=True,
+                      timeout=3,check=False)
+                  v=proc.stdout.strip()
+                  if proc.returncode==0 and v.startswith("v") and len(v)<60 and all(c.isdigit() or c in "v." for c in v):
+                      print(label+"="+v)
+                  else:
+                      print(label+"=VERSION_UNVERIFIED")
+              except (OSError,subprocess.TimeoutExpired):
+                  print(label+"=ABSENT_OR_INACCESSIBLE")
+
+          p=subprocess.run(["systemctl","show","abutron-mcp-tunnel.service",
+                  "-p","LoadState","-p","ActiveState","-p","UnitFileState","--no-pager"],
+                  capture_output=True,text=True,timeout=7,check=False)
+          result={}
+          for line in p.stdout.splitlines():
+              if "=" in line:
+                  k,v=line.split("=",1)
+                  if k in ("LoadState","ActiveState","UnitFileState") and
+                      len(v)<30 and v.replace("-","").isalnum():
+                      result[k]=v
+          for k in ("LoadState","ActiveState","UnitFileState"):
+              print("TUNNEL_"+k.upper()+"="+result.get(k,"UNVERIFIED"))
+
+          print("READ_ONLY_CHECK_COMPLETED=YES")
+          print("CHATGPT_PLUS_CUSTOM_MCP_WRITE_ACCESS=NOT_ATTESTED")
+          print("REMOTE_DESKTOP_COMMANDER_QUOTA=NOT_RESET_BY_THIS_AUDIT")
+          PY
