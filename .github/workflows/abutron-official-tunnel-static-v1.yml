@@ -1,0 +1,47 @@
+name: ABUTRON Official Tunnel Client Offline Policy Tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/abutron-official-tunnel-install-v1.yml'
+      - '.github/workflows/abutron-official-tunnel-static-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the fixed Bash and embedded Python without executing it
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          source=Path(".github/workflows/abutron-official-tunnel-install-v1.yml").read_text()
+          marker="        run: |\n"
+          assert source.count(marker)==1
+          body=source.split(marker,1)[1]
+          script="\n".join(line[10:] if line.startswith("          ") else line
+                           for line in body.splitlines())+"\n"
+          assert 'ABUTRON OPS INSTALL OFFICIAL MCP TUNNEL V1' in source
+          assert "permissions: {}" in source
+          assert "uses:" not in body
+          assert "2f06ce5a17425c74a827e7038692936e973ae388e7eec728c40efee1fb5f139d" in script
+          assert "sha256sum --check --status" in script
+          assert "sudo -n /usr/bin/install -o root -g root -m 0755" in script
+          assert 'systemctl' not in script
+          assert 'sudo -n /usr/bin/bash' not in script
+          assert 'sudo -n /usr/bin/sh' not in script
+          result=subprocess.run(["bash","-n"],input=script,text=True,capture_output=True)
+          assert result.returncode==0,result.stderr
+          head="python3 - \"$work/tunnel-client.zip\" \"$work/tunnel-client\" <<'PY'\n"
+          assert head in script
+          py=script.split(head,1)[1].split("\nPY\n",1)[0]
+          compile(py,"official-tunnel-extract","exec")
+          print("OFFICIAL_TUNNEL_DOWNLOAD_AND_INSTALL_STATIC_PASS")
+          PY
