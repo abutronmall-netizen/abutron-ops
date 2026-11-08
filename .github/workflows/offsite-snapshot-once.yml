@@ -1,0 +1,59 @@
+name: ABUTRON Owner-Approved Offsite Backup (one-shot)
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: none
+  issues: read
+
+concurrency:
+  group: abutron-one-shot-offsite-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OFFSITE BACKUP V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 25
+    steps:
+      - name: Run only the preinstalled root-owned encrypted offsite backup script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/bash -s <<'ROOT'
+          set -Eeuo pipefail
+          SCRIPT=/usr/local/sbin/abutron-full-offsite-20261029
+          if [[ -L "$SCRIPT" || ! -f "$SCRIPT" ]]; then
+            echo 'BACKUP_SCRIPT_UNVERIFIED'
+            exit 8
+          fi
+          read -r uid mode < <(stat -c '%u %a' "$SCRIPT")
+          if [[ "$uid" != 0 || $((8#$mode & 022)) -ne 0 ]]; then
+            echo 'BACKUP_SCRIPT_NOT_ROOT_CONTROLLED'
+            exit 9
+          fi
+          /usr/bin/bash -n "$SCRIPT"
+          echo 'BACKUP_SCRIPT_SYNTAX_VERIFIED'
+          LOG=$(mktemp /var/log/abutron-gh-one-shot-backup-20261108-XXXXXXXX.log)
+          chmod 600 "$LOG"
+          if "$SCRIPT" >"$LOG" 2>&1; then
+            echo 'BACKUP_SCRIPT_EXIT_SUCCESS'
+          else
+            rc=$?
+            echo "BACKUP_SCRIPT_EXIT_FAILED_$rc"
+            echo 'Root-only log retained; no secrets printed to CI'
+            exit "$rc"
+          fi
+          /usr/bin/python3 - "$LOG" <<'PY'
+          import pathlib, sys
+          s=pathlib.Path(sys.argv[1]).read_text(errors='replace')
+          for token in ('FULL_BACKUP_END_SUCCESS','RESTIC_REPO_METADATA_CHECK_PASS',
+                        'V7_DATABASE_REMOTE_DUMP_READBACK_PASS'):
+              print('EVIDENCE',token,token in s)
+          print('LOG_PRIVATELY_RETAINED_NO_SECRETS_OUTPUT')
+          PY
+          ROOT
