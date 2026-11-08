@@ -1,0 +1,58 @@
+name: ABUTRON Desktop Commander Repair Node Execute Permission V1
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+concurrency:
+  group: abutron-dcmcp-node-permission-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'abutronmall-netizen' &&
+      github.triggering_actor == 'abutronmall-netizen' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON OPS REPAIR ISOLATED NODE V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Repair only verified root-owned Node 22 bin directory and executable
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(id -un)" = 'abutrongha'
+          test "$(id -u)" -ne 0
+          ROOT=/opt/abutron-mcp/node
+          BIN="$ROOT/bin"
+          NODE="$BIN/node"
+          test -d /opt/abutron-mcp
+          test ! -L /opt/abutron-mcp
+          test ! -L "$ROOT"
+          sudo -n /usr/bin/test -d "$ROOT"
+          sudo -n /usr/bin/test -d "$BIN"
+          sudo -n /usr/bin/test -f "$NODE"
+          sudo -n /usr/bin/test ! -L "$BIN"
+          sudo -n /usr/bin/test ! -L "$NODE"
+          for path in "$ROOT" "$BIN" "$NODE"; do
+            test "$(sudo -n /usr/bin/stat -c '%u:%g' "$path")" = '0:0'
+          done
+          before_dir="$(sudo -n /usr/bin/stat -c '%a' "$BIN")"
+          before_bin="$(sudo -n /usr/bin/stat -c '%a' "$NODE")"
+          echo "NODE_BIN_DIR_BEFORE=$before_dir"
+          echo "NODE_EXEC_BEFORE=$before_bin"
+          test "$(sudo -n "$NODE" --version)" = 'v22.23.4'
+          # No recursive chmod, no other filesystem or trading changes.
+          sudo -n /usr/bin/chmod 0755 "$BIN"
+          sudo -n /usr/bin/chmod 0755 "$NODE"
+          test "$(stat -c '%a' "$BIN")" = '755'
+          test "$(stat -c '%a' "$NODE")" = '755'
+          test "$("$NODE" --version)" = 'v22.23.4'
+          echo 'ISOLATED_NODE_NONROOT_EXECUTION_PASS=v22.23.4'
+          echo 'ONLY_ISOLATED_NODE_BIN_PERMISSION_MODIFIED=YES'
+          echo "GLOBAL_NODE_UNCHANGED=$(/usr/bin/node --version)"
