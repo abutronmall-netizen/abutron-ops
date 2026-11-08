@@ -1,0 +1,49 @@
+name: ABUTRON 6207 Status After Recovery (one-shot)
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  audit:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 STATUS AFTER RECOVERY V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Read-only sanitized sidecar startup state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/python3 - <<'PY'
+          import json,subprocess,re,time,stat
+          from pathlib import Path
+          unit='abutron-native-readonly-mt5-6207.service'
+          print('AFTER_RECOVERY_STATUS')
+          p=subprocess.run(['systemctl','show',unit,'--no-pager','-p','ActiveState','-p','SubState','-p','Result','-p','ExecMainStatus','-p','ExecMainStartTimestamp','-p','ExecMainExitTimestamp'],capture_output=True,text=True,timeout=6)
+          for line in p.stdout.splitlines():
+              if '=' in line:
+                  k,v=line.split('=',1)
+                  if k in ('ActiveState','SubState','Result','ExecMainStatus','ExecMainStartTimestamp','ExecMainExitTimestamp'):
+                      print('service',k,v[:100])
+          p=Path('/var/lib/private/abutron-native-readonly-mt5-6207/worker-health.json')
+          if not p.is_file() or p.is_symlink() or p.stat().st_size>15000:
+              print('health_file_missing_or_unsafe')
+          else:
+              try:
+                  d=json.loads(p.read_text())
+                  s=d.get('status')
+                  print('health_status',s if type(s)==str and re.fullmatch('[A-Z0-9_]{3,90}',s) else 'UNKNOWN')
+                  print('health_age_seconds',int(time.time()-p.stat().st_mtime))
+                  n=d.get('nonce')
+                  print('nonce_schema_valid',type(n)==str and re.fullmatch('[0-9a-f]{32}',n) is not None)
+                  print('native_session_identity',d.get('broker_session_identity_verified') is True)
+                  print('native_history_authenticated',d.get('native_history_source_authenticated') is True)
+                  print('health_key_count',len(d))
+              except Exception as e:
+                  print('health_parse_failure',type(e).__name__)
+          print('READONLY_POSTSTART_CHECK_COMPLETE')
+          PY
