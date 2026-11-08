@@ -1,0 +1,27 @@
+name: ABUTRON MCP Gateway — Offline Syntax & Security Checks
+on:
+  pull_request:
+    paths:
+      - 'ops/mcp_gateway/**'
+      - '.github/workflows/mcp-gateway-static-tests.yml'
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bash syntax without running privileged commands
+        run: bash -n ops/mcp_gateway/abutron-mcp-tunnel.sh
+      - name: Verify no public bind and explicit approval gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          f=ops/mcp_gateway/abutron-mcp-tunnel.sh
+          grep -Fq 'tunnel-client run --profile abutron-production' "$f"
+          grep -Fq 'STAGED_ONLY: service not started or enabled' "$f"
+          grep -Fq '[[ ! -e "$UNIT"' "$f"
+          grep -Fq 'User=root' "$f"
+          ! grep -Eq 'curl.*[|].*(bash|sh)|wget.*[|].*(bash|sh)|0\\.0\\.0\\.0:|npm (install|update) -g' "$f"
+          echo 'STATIC_MCP_GUARDS_PASS'
