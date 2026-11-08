@@ -11,16 +11,17 @@ Private repository for **fixed, reviewed GitHub Actions operations** on the ABUT
 
 ## Reviewed operations workflow
 
-`.github/workflows/abutron-reviewed-operations-v1.yml` introduces four literal operation choices. Launch via **Actions → ABUTRON Reviewed Runner Operations V1 → Run workflow → main**. Only repository-owner `abutronmall-netizen`, the original triggering actor, the default `main` ref and this exact repository are accepted.
+`.github/workflows/abutron-reviewed-operations-v1.yml` introduces five literal operation choices. Launch via **Actions → ABUTRON Reviewed Runner Operations V1 → Run workflow → main**. Only repository-owner `abutronmall-netizen`, the original triggering actor, the default `main` ref and this exact repository are accepted.
 
 | Operation | Actual host command / behavior | Capability now |
 | --- | --- | --- |
 | `verify-host` | Fixed nonsecret, read-only host/systemd/hash commands; verifies root-owned nonwritable sudo policy and nonroot runner identity | Ready |
 | `verify-staging` | `sudo -n /usr/local/sbin/abutron-gh-apex-staging-verify` | Ready, **can legitimately fail** on FP clock-collector baseline drift |
+| `verify-native-services` | Fixed, non-root systemd status and sanitized known error-category counts for nine allowlisted native units; no raw journal output | Ready |
 | `stage-approved-source` | `sudo -n /usr/local/sbin/abutron-gh-apex-source-stage-v1` (no arguments) | **LOCKED** until a separately reviewed fixed root-owned source-only stager and exact-command sudoers entry have been securely installed |
 | `rollback-staged-source` | `sudo -n /usr/local/sbin/abutron-gh-apex-source-rollback-v1` (no arguments) | **LOCKED** until a separately reviewed fixed root-owned rollback program and exact-command sudoers entry have been installed |
 
-For repeatable connector-based smoke tests, only these two owner-created exact-title issues may trigger the *new* workflow: `ABUTRON OPS VERIFY HOST V1`, `ABUTRON OPS VERIFY STAGING V1`. No issue title, body, labels or comments can invoke deployment or rollback. Outputs remain in GitHub Actions logs. Never paste secrets into issues.
+For repeatable connector-based smoke tests, only these three owner-created exact-title issues may trigger the *new* workflow: `ABUTRON OPS VERIFY HOST V1`, `ABUTRON OPS VERIFY STAGING V1`, `ABUTRON OPS VERIFY NATIVE SERVICES V1`. No issue title, body, labels or comments can invoke deployment or rollback. Outputs remain in GitHub Actions logs. Never paste secrets into issues.
 
 **Deployment meaning:** the future stage operation must copy only independently hash-pinned, approved APEX source into protected *inactive* staging after verifying a fresh encrypted offsite backup, exact source and rollback; it must never install an EX5 into active terminals, change CRM ON/OFF, start writer timers, send orders, touch LIVE accounts or change database schema. Production integration and broker-verified DEMO acceptance require a separately approved process. These root programs **have not been installed by this workflow**. The missing commands are deliberate fail-closed controls, not unfinished implicit sudo access.
 
