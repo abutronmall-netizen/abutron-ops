@@ -1,0 +1,54 @@
+name: ABUTRON 6207 MetaEditor Isolated Startup Diagnosis
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  diagnose:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON 6207 METAEDITOR STARTUP DIAG V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Review harmless smoke toolchain logs and Wine process state; no compiler invocation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          /usr/bin/python3 - <<'PY'
+          import os,re,subprocess,time
+          from pathlib import Path
+          def cmd(argv):
+              try:
+                  p=subprocess.run(argv,text=True,capture_output=True,timeout=6)
+                  return (p.stdout+"\n"+p.stderr).strip()[:280]
+              except Exception as e:return type(e).__name__
+          print("WINE_VERSION",cmd(["wine","--version"]))
+          print("EDITOR_PE_INFO",cmd(["file","/opt/abutron/client-mt5-template-v2/MetaEditor64.exe"]))
+          print("DISPLAY_PRESENT",bool(os.getenv("DISPLAY")))
+          print("XDG_RUNTIME_DIR_PRESENT",bool(os.getenv("XDG_RUNTIME_DIR")))
+          tmp=Path(os.environ.get("RUNNER_TEMP","/nonexistent"))
+          print("RUNNER_TEMP_PRESENT",tmp.is_dir())
+          dirs=sorted([p for p in tmp.glob("abutron-metaeditor-smoke.*") if p.is_dir() and not p.is_symlink()],
+                      key=lambda p:p.stat().st_mtime,reverse=True)[:3]
+          print("SMOKE_DIR_COUNT",len(dirs))
+          for d in dirs:
+              print("QA_DIR_AGE_SECONDS",round(time.time()-d.stat().st_mtime))
+              for filename in ("wineboot.log","metaeditor_stdout.log","AbutronCompileOnlySmoke.log"):
+                  f=d/filename
+                  if not f.is_file() or f.is_symlink() or f.stat().st_size>500000:continue
+                  print("LOG",filename,"bytes",f.stat().st_size)
+                  # This is a harmless 3-line smoke source, not private trading source.
+                  lines=f.read_text(errors="replace").splitlines()
+                  safe=[]
+                  for line in lines[-55:]:
+                      line=re.sub(r"\x1b\[[0-9;]*m","",line)
+                      if any(t in line.lower() for t in ["failed","error","warning","cannot","fixme","start","wine","metaeditor","update","gtk","DISPLAY","timeout","x11","font","vulkan"]):
+                          safe.append(line[:190])
+                  for line in safe[-15:]:print("SAFE_DIAG",line)
+              print("QA_TOP_FILES",sorted(x.name for x in d.iterdir())[:20])
+          print("READONLY_DIAG_COMPLETE")
+          PY
