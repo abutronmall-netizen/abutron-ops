@@ -1,0 +1,33 @@
+name: ABUTRON Controlled Sudo Staging Verification
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: none
+  issues: read
+
+concurrency:
+  group: abutron-controlled-sudo-staging
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON SUDO STAGING VERIFY V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 8
+    steps:
+      - name: Verify fixed root-owned ABUTRON staging program only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ "$(id -u)" == 0 ]]; then
+            echo 'Unsafe runner identity: already root'
+            exit 2
+          fi
+          test -x /usr/local/sbin/abutron-gh-apex-staging-verify
+          sudo -n /usr/local/sbin/abutron-gh-apex-staging-verify
