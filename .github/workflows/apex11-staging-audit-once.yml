@@ -1,0 +1,45 @@
+name: ABUTRON APEX11 Staging Read-only Audit
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  audit:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON APEX11 STAGING AUDIT V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Read-only staged files and SHA256
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo -n /usr/bin/python3 - <<'PY'
+          import os,hashlib,stat,json,time,subprocess
+          from pathlib import Path
+          base=Path('/opt/abutron-apex11-staging')
+          print('APEX11_STAGING_AUDIT_UTC',time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()))
+          if not base.is_dir():raise SystemExit('APEX_STAGE_MISSING')
+          for p in sorted(base.iterdir(),key=lambda v:v.name):
+              if len(p.name)<75:print('STAGING_ENTRY',p.name,'directory' if p.is_dir() else 'file')
+          for root in [base,base/'apex11',base/'risk_guard',Path('/opt/apex-client-mt5')]:
+              print('ROOT_EXISTS',str(root),root.is_dir())
+          for name in ['VERSION','SOURCE_IMPORT_AUDIT.json','abutron_replacement/bridge.py',
+                       'abutron_replacement/native_risk_preflight.py','abutron_replacement/account_bound_publisher.py',
+                       'abutron_replacement/native_receipt_guard.py',
+                       'abutron_replacement/transactional_activation.py','abutron_replacement/fp_history_window.py',
+                       'apex/engine.py','requirements.txt']:
+              for prefix in [base/'apex11',base]:
+                  p=prefix/name
+                  if p.is_file() and not p.is_symlink() and p.stat().st_size<100000:
+                      print('STAGING_FILE',str(p.relative_to(base)),hashlib.sha256(p.read_bytes()).hexdigest())
+                      break
+              else:print('STAGING_FILE_MISSING',name)
+          for p in [Path('/opt/apex-client-mt5/apex_native_order_runtime.py'), Path('/etc/sudoers.d/90-abutron-github')]:
+              print('EXTERNAL_PATH',str(p),'exists',p.is_file())
+          print('STAGING_AUDIT_COMPLETE_NO_IMPORTS_NO_EXECUTION')
+          PY
