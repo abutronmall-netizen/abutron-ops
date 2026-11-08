@@ -1,0 +1,43 @@
+name: ABUTRON Deriv V4 Include Access Preflight
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: none
+  issues: read
+jobs:
+  check:
+    if: >-
+      github.repository == 'abutronmall-netizen/abutron-ops' &&
+      github.event.issue.user.login == 'abutronmall-netizen' &&
+      github.event.issue.title == 'ABUTRON DERIV V4 INCLUDE ACCESS CHECK V1'
+    runs-on: [self-hosted, linux, x64, abutron-diagnostics]
+    timeout-minutes: 3
+    steps:
+      - name: Check compiler tools and header access without sudo or printing contents
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          /usr/bin/python3 - <<'PY'
+          import hashlib,os,shutil
+          from pathlib import Path
+          expected="e2e4e01ef5e96f888f687a45e21de83cfc78b419787a0c3667d96914d1cc3c44"
+          for name in ("wine","winepath","wineboot","wineserver","xvfb-run"):
+              print("TOOL",name, bool(shutil.which(name)))
+          for path in [
+              "/root/abutron_optionc_cutover/AdaptiveRiskProofV2.mqh",
+              "/var/backups/abutron-five-volatility-prechange-20261107T105218Z/candidate/AdaptiveRiskProofV2.mqh",
+              "/var/backups/abutron-option-c-v2-release-20261105/adaptive-existing-ea-cutover-with-native-v2-proof/AdaptiveRiskProofV2.mqh",
+              "/var/lib/abutron-apex11-source-handoff/AdaptiveRiskProofV2.mqh",
+          ]:
+              p=Path(path)
+              print("FILE",path,"readable",os.access(p,os.R_OK))
+              if os.access(p,os.R_OK) and p.is_file() and not p.is_symlink():
+                  print("HASH_VALID",hashlib.sha256(p.read_bytes()).hexdigest()==expected)
+          editor=Path("/opt/abutron/client-mt5-template-v2/MetaEditor64.exe")
+          print("EDITOR_READABLE",os.access(editor,os.R_OK))
+          if os.access(editor,os.R_OK):
+              st=editor.stat()
+              print("EDITOR_ROOT_OWNED",st.st_uid==0,"NOT_GROUP_WORLD_WRITABLE",not bool(st.st_mode&0o022))
+          print("PREFLIGHT_COMPLETE_NO_CHANGES")
+          PY
