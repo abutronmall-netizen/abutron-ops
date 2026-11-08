@@ -43,6 +43,11 @@ jobs:
               ["free", "-h"],
               ["df", "-h", "/"],
               ["systemctl", "is-system-running"],
+              ["systemctl", "--failed", "--no-pager", "--no-legend"],
+              ["systemctl", "show", "-p", "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Result", "abutron-native-readonly-mt5-6207.service"],
+              ["systemctl", "show", "-p", "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Result", "abutron-fpmarkets-native-feed.service"],
+              ["systemctl", "show", "-p", "LoadState", "-p", "ActiveState", "-p", "SubState", "-p", "Result", "abutron-fpmarkets-native-feed.timer"],
+              ["sha256sum", "/opt/apex-client-mt5/fpmarkets-history/fp_native_history_collect.py"],
           ]
 
           lines = ["### ABUTRON read-only system health", "",
