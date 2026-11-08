@@ -63,3 +63,55 @@ On a separate nonproduction environment: \`python3 -m unittest discover -s ops/t
 - Independent isolated Restic full restore was NOT yet verified.
 - The actual root command paths and sudoers addition do NOT yet exist. Until installed, workflow stage/rollback options correctly fail closed.
 - Native 6207 V4 root guardian and genuine Deriv receipt, FP native history/execution/ledger, plus six failed services remain outstanding. No LIVE trades.
+
+
+## One-time root bootstrap installer — 8 November 2026
+
+A code-reviewed, root-only installer is now available as
+\`ops/root_install_source_ops_v1.py\`. It is **not** callable through the
+GitHub self-hosted runner; it must be run once by an authenticated human
+operator logged in to the actual \`localhost\` server.
+
+Before executing: verify the most recent encrypted offsite Restic backup and
+its database readback, preserve a secure copy of the existing sudoers policy,
+check the server's protected file ownership, and confirm the operator's private
+Git checkout at \`/root/abutron-ops\` is owned by root and not group/world
+writable. Do not assume an earlier backup also proves isolated restoration.
+
+From a verified root shell, after checking out the approved, reviewed commit
+of private \`abutronmall-netizen/abutron-ops\` in \`/root/abutron-ops\`,
+inspect the exact code and confirm:
+
+\`\`\`bash
+cd /root/abutron-ops
+git rev-parse HEAD
+git hash-object ops/approved_source_stage_v1.py
+# Must print: ef89d40d3af2c5481405ea694483bf1b1b478fa4
+sed -n '1,250p' ops/root_install_source_ops_v1.py
+/usr/bin/python3 -I /root/abutron-ops/ops/root_install_source_ops_v1.py
+\`\`\`
+
+This installs exactly two root-owned (0750) executables with isolated Python
+(\`/usr/bin/python3 -I\`) and root-owned sudoers mode 0440 granting
+\`abutrongha\` **only those exact commands with no arguments**. It checks
+\`visudo\` and refuses any existing unapproved target, unsafe parent, source
+hash mismatch, or unexpected ability to invoke \`sudo -n id\` or
+\`sudo -n bash\`. A failed validation removes newly created command and
+sudoers files.
+
+A successful bootstrap prints
+\`ABUTRON_RESTRICTED_ROOT_EXECUTABLES_INSTALLED\`. It does not stage a bundle
+unless a **separately verified backup, isolated restore and root-only source
+approval manifest** exist. It never activates trades, installs an EA into
+active MT5, starts timers or enables LIVE.
+
+**Rollback of the bootstrap itself:** a root operator may remove ONLY the
+three exact files created above, after confirming no other process depends on
+them, and recheck \`visudo -c\`. Do not remove or relax unrelated sudoers rules.
+The inactive root staging area is preserved for audit and can be separately
+reviewed before removal. GitHub workflow staging/rollback choices fail
+closed after those sudo grants are revoked.
+
+**Important:** the bootstrap is presently only a reviewed GitHub file until
+the actual server root command returns success. CI cannot grant itself
+additional privileges.

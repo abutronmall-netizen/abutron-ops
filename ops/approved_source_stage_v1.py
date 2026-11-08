@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python3 -I
 """ABUTRON fixed, owner-bootstrapped INACTIVE source staging and rollback.
 
 INSTALLATION IS NOT AUTOMATIC. Review on production with a real root operator.
