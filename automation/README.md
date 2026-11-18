@@ -9,6 +9,7 @@ This folder is the public-safe operations blueprint. It **does not** contain cus
 | File | Contents |
 |---|---|
 | [BLUEPRINT.md](BLUEPRINT.md) | Platform architecture, automation stages, dependencies and worker responsibilities |
+| [AGENTIC_DEPLOYMENT_AUDIT.md](AGENTIC_DEPLOYMENT_AUDIT.md) | Merged agentic engine, current server deployment status and native exposure integration gap |
 | [inventory/summary.json](inventory/summary.json) | System-wide snapshot counts and limitations |
 | [inventory/](inventory/) | Every in-scope systemd unit, grouped into nine responsibility areas |
 | [inventory/worker-source-registry.json](inventory/worker-source-registry.json) | Installed executable/source basenames, SHA-256 hashes and reference counts |

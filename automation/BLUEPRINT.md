@@ -123,6 +123,14 @@ These are enforced regardless of deployment mode and are **not** removed by the 
 
 **Supervision:** systemd scheduled runs, watchdogs, MCP tunnel and reviewed GitHub workflows should expose objective exit status, freshness and durable error evidence. Disabled, masked, stale and failed units must be kept distinguishable.
 
+### Verified agentic exposure integration gap (18 November 2026)
+
+The agentic engine is merged into V9 source but not established as the installed decision authority on Ubuntu. A fresh read-only host inspection found the V9 risk status **NOT_CERTIFIED_FOR_NEW_ORDERS**.
+
+Crucially, the merged MT5 worker launches/restarts a terminal but **does not publish a trusted full native equity/position snapshot or call CRM certification**. The only repository call to the CRM certification method is in the offline certification harness. The CRM method accepts a caller-provided verified flag and the risk engine reads local receipt rows; neither alone proves the broker's complete position inventory. Manually marking native_positions_verified=true is not a legitimate substitute for fresh broker-native evidence.
+
+See [Agentic deployment evidence audit](AGENTIC_DEPLOYMENT_AUDIT.md) for precise code paths, **36/36** independently passed isolated agentic tests, the required worker-to-CRM integration, and completion criteria. **Do not claim LIVE readiness or enable the agentic order path on the strength of the merged PR, a test-harness result or a toggle alone.**
+
 ## 5. Runtime evidence vs claimed completion
 
 - **Observed:** systemd definition and snapshot state of 389 matching units; 181 installed executable/source references; metadata hashes; scheduled timer declarations.
