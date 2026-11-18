@@ -30,6 +30,21 @@
 
 The two merged agentic test suites, tests/test_agent_system.py and tests/test_agentic_integration.py, passed **36/36** against the checked-out main source in DEMO mode, with a temporary /tmp data root and LIVE trading disabled. This verifies software-level interfaces, not MetaEditor compilation, live broker-native ACKs, a real exposure-certificate publisher, or safe order execution.
 
+## Independently reproduced false certification (synthetic, no broker)
+
+A separate isolated local DEMO SQLite test registered one synthetic account without broker-native positions or local OPEN receipts, then invoked the merged CRM method with caller-supplied native_positions_verified=True.
+
+| Test observation | Value |
+|---|---|
+| Broker-native snapshots attached | 0 |
+| Local OPEN receipt rows | 0 |
+| owner_risk_certified before CRM flag | False |
+| owner_risk_certified after manual CRM flag | **True** |
+| Aggregate stop-risk reported | **0.0 USD** |
+| cap_exceeded reported | **False** |
+
+This demonstrates that the DB certification flag can make an owner appear risk-certified without a complete authenticated native broker position inventory. It does not establish that the real broker has no open positions. No production database, MT5 terminal, order or LIVE account was touched. [V9 Issue #36](https://github.com/abutronmall-netizen/ABUTRON-FX-V9/issues/36) tracks the defect with exact acceptance criteria.
+
 ## Authoritative worker-to-execution blueprint
 
     Broker MT5 account/session and full position inventory
