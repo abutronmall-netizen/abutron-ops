@@ -1,0 +1,44 @@
+{
+  "active_states": {
+    "activating": 4,
+    "active": 159,
+    "failed": 19,
+    "inactive": 207
+  },
+  "categories": {
+    "crm_licensing_portal": 34,
+    "evidence_market_data": 48,
+    "execution_reconciliation": 77,
+    "infrastructure_operations": 8,
+    "model_research": 61,
+    "mt5_runtime": 38,
+    "other": 91,
+    "recovery_backup": 16,
+    "risk_compliance": 16
+  },
+  "existing_public_v9_script_unit_refs": 7,
+  "install_states": {
+    "disabled": 40,
+    "enabled": 151,
+    "masked": 12,
+    "static": 171,
+    "transient": 15
+  },
+  "limitations": [
+    "point-in-time",
+    "only metadata",
+    "no source bytes or full unit texts",
+    "no secrets",
+    "no customer evidence",
+    "no execution certification"
+  ],
+  "scope": "ABUTRON, APEX, FP, Deriv, MT5, restic and actions.runner prefixes; other OS services omitted",
+  "snapshot_utc": "2026-11-18T18:14:05.612258+00:00",
+  "total": 389,
+  "unique_source_files": 181,
+  "unit_types": {
+    "service": 215,
+    "socket": 2,
+    "timer": 172
+  }
+}
